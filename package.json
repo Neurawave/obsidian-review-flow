@@ -5,8 +5,11 @@
   "description": "Edit documents in Obsidian and send them for approval through GitHub pull requests.",
   "license": "MIT",
   "scripts": {
-    "build": "node --check src/main.js && cp src/main.js src/styles.css .",
+    "build": "node esbuild.config.mjs",
     "test": "node --test test/",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

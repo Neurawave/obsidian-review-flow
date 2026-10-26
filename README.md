@@ -70,7 +70,7 @@ Nothing needs to be added to the documents repository. If pasted images would no
 
 ## Development
 
-The plugin is plain JavaScript in `src/`. `npm run build` checks it and copies `src/main.js` and `src/styles.css` to the files Obsidian loads; there is nothing to compile. The tests run the git flow against a temporary repository with a fake `gh`:
+The plugin is plain JavaScript in `src/plugin.js` and `src/plugin.css`. `npm run build` bundles them with esbuild into `main.js` and `styles.css`, the files Obsidian loads, like Obsidian's sample plugin. The tests run the git flow against a temporary repository with a fake `gh`:
 
 ```bash
 npm test

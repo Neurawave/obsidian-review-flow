@@ -70,7 +70,7 @@ Inget behöver läggas till i dokumentrepot. Om inklistrade bilder inte skulle f
 
 ## Utveckling
 
-Tillägget är vanlig JavaScript i `src/`. `npm run build` kontrollerar koden och kopierar `src/main.js` och `src/styles.css` till filerna Obsidian läser in; inget behöver kompileras. Testerna kör git-flödet mot ett tillfälligt repo med ett fejkat `gh`:
+Tillägget är vanlig JavaScript i `src/plugin.js` och `src/plugin.css`. `npm run build` paketerar dem med esbuild till `main.js` och `styles.css`, filerna Obsidian läser in, som i Obsidians exempeltillägg. Testerna kör git-flödet mot ett tillfälligt repo med ett fejkat `gh`:
 
 ```bash
 npm test
