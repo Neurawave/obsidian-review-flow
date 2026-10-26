@@ -44,7 +44,7 @@ Gör det här en gång per dokumentrepo, så får de som skriver allt när de kl
 3. Lägg till `.obsidian/community-plugins.json` med innehållet `["review-flow"]`.
 4. Lägg till `.obsidian/app.json`, så att bilder sparas bredvid dokumentet och syns på GitHub:
    ```json
-   { "attachmentFolderPath": "./bilagor", "useMarkdownLinks": true, "newLinkFormat": "relative" }
+   { "attachmentFolderPath": "./attachments", "useMarkdownLinks": true, "newLinkFormat": "relative" }
    ```
 5. Lägg `.obsidian/workspace*.json` i `.gitignore`, så att fönsterlayouter inte hamnar i commits.
 6. Skydda den godkända grenen på GitHub: kräv pull request och minst ett godkännande. Review Flow gör flödet enkelt; GitHub ser till att det godkänns.

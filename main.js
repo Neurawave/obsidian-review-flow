@@ -834,6 +834,7 @@ class ReviewFlowPlugin extends Plugin {
       this.state = { error: e };
     }
     this.render();
+    if (this.state.onBase && this.state.changes.length && Date.now() >= this.quietUntil) return this.moveToDraft(this.state.changes);
     if (Date.now() - this.lastCleanup > CLEANUP_INTERVAL && this.state && !this.state.error && !this.state.setup) {
       this.lastCleanup = Date.now();
       if (await this.flow.cleanupMerged().catch(() => false)) this.refresh();
@@ -904,22 +905,19 @@ class ReviewFlowPlugin extends Plugin {
     if (this.login && safeUrl(this.login.url)) window.open(this.login.url);
   }
 
-  // Typing in the approved version moves the change into a new draft right away.
-  async onVaultChange(file) {
+  // Changes in the approved version move into a new draft right away (see refresh).
+  onVaultChange(file) {
     if (!file || !this.inScope(file.path)) return;
     if (this.busy || Date.now() < this.quietUntil) return; // files change on disk when we switch branches
-    const st = this.state;
-    if (st && !st.error && st.onBase) {
-      const now = await this.flow.state().catch(() => null);
-      if (now && now.onBase && now.changes.length && !this.busy) {
-        await this.run(async () => {
-          const name = await this.flow.startDraft(baseName(now.changes[0]).replace(/\.md$/, ''));
-          new Notice(this.t('draftCreated', this.flow.draftName(name)), 8000);
-        });
-        return;
-      }
-    }
     this.refreshSoon();
+  }
+
+  moveToDraft(changes) {
+    const doc = changes.find((f) => f.endsWith('.md')) || changes[0];
+    return this.run(async () => {
+      const name = await this.flow.startDraft(baseName(doc).replace(/\.md$/, ''));
+      new Notice(this.t('draftCreated', this.flow.draftName(name)), 8000);
+    });
   }
 
   // Writes any pending editor changes to disk before git looks at the files.
