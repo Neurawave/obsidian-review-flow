@@ -70,7 +70,7 @@ Nothing needs to be added to the documents repository. If pasted images would no
 
 ## Development
 
-No build step: `main.js` is the plugin, and `npm run build` only checks its syntax. The tests run the git flow against a temporary repository with a fake `gh`:
+The plugin is plain JavaScript in `src/`. `npm run build` checks it and copies `src/main.js` and `src/styles.css` to the files Obsidian loads; there is nothing to compile. The tests run the git flow against a temporary repository with a fake `gh`:
 
 ```bash
 npm test

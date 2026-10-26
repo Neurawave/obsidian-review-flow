@@ -12,7 +12,7 @@ const load = Module._load;
 Module._load = function (request, ...rest) {
   return request === 'obsidian' ? new Proxy({}, { get: () => class {} }) : load.call(this, request, ...rest);
 };
-const { GitFlow, STRINGS, makeExec, slugify, parseStatus, parseLogin, safeUrl } = require('../main.js');
+const { GitFlow, STRINGS, makeExec, slugify, parseStatus, parseLogin, safeUrl } = require('../src/main.js');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'review-flow-'));
 const remote = path.join(tmp, 'remote.git');

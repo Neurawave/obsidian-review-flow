@@ -1,3 +1,6 @@
 node_modules/
 data.json
 .DS_Store
+# Built by npm run build from src/
+main.js
+styles.css

@@ -70,7 +70,7 @@ Inget behöver läggas till i dokumentrepot. Om inklistrade bilder inte skulle f
 
 ## Utveckling
 
-Inget byggsteg: `main.js` är tillägget, och `npm run build` kontrollerar bara syntaxen. Testerna kör git-flödet mot ett tillfälligt repo med ett fejkat `gh`:
+Tillägget är vanlig JavaScript i `src/`. `npm run build` kontrollerar koden och kopierar `src/main.js` och `src/styles.css` till filerna Obsidian läser in; inget behöver kompileras. Testerna kör git-flödet mot ett tillfälligt repo med ett fejkat `gh`:
 
 ```bash
 npm test
