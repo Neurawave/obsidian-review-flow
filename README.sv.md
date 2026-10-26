@@ -6,7 +6,9 @@ Redigera Markdown-dokument i Obsidian och skicka ändringar för godkännande, u
 
 Review Flow är till för team som har sina dokument i ett git-repo på GitHub och godkänner varje ändring med en pull request, till exempel styrda dokument i ett kvalitetsledningssystem. Den som skriver får en panel med en huvudknapp. Git och GitHub sköter resten i bakgrunden.
 
-> **Status: prototyp (0.1).** Git-flödet har automatiska tester. Användargränssnittet i Obsidian är ännu inte brett testat.
+**Ny användare?** Följ [Kom igång](KOM-IGANG.md).
+
+> **Status: prototyp (0.1).** Git-flödet har automatiska tester. Användargränssnittet i Obsidian är provat för hand men ännu inte brett testat.
 
 ## Så fungerar det
 
@@ -30,21 +32,22 @@ Det finns ingen Redigera- eller Spara-knapp:
 - [GitHub CLI](https://cli.github.com) (`gh`).
 - Valvet är ett git-repo klonat från GitHub (eller en mapp i ett).
 
-Logga in en gång i en terminal:
+## Sätta upp ett repo
 
-```bash
-gh auth login
-```
+Gör det här en gång per dokumentrepo, så får de som skriver allt när de klonar det. De som skriver följer sedan [Kom igång](KOM-IGANG.md).
 
-Välj GitHub.com och HTTPS, och svara ja på att git ska använda dina GitHub-uppgifter.
-
-## Installation
-
-Tills tillägget finns i katalogen för community-tillägg:
-
-1. Skapa mappen `<valv>/.obsidian/plugins/review-flow/`.
-2. Kopiera `main.js`, `manifest.json` och `styles.css` från en release (eller det här repot) dit.
-3. I Obsidian: **Inställningar → Community-tillägg**, slå på **Review Flow**.
+1. Kopiera `main.js`, `manifest.json` och `styles.css` från en release till `.obsidian/plugins/review-flow/` i repot.
+2. Lägg till `.obsidian/plugins/review-flow/data.json` med mapparna som ska användas, till exempel:
+   ```json
+   { "folders": "qms", "baseBranch": "main" }
+   ```
+3. Lägg till `.obsidian/community-plugins.json` med innehållet `["review-flow"]`.
+4. Lägg till `.obsidian/app.json`, så att bilder sparas bredvid dokumentet och syns på GitHub:
+   ```json
+   { "attachmentFolderPath": "./bilagor", "useMarkdownLinks": true, "newLinkFormat": "relative" }
+   ```
+5. Lägg `.obsidian/workspace*.json` i `.gitignore`, så att fönsterlayouter inte hamnar i commits.
+6. Skydda den godkända grenen på GitHub: kräv pull request och minst ett godkännande. Review Flow gör flödet enkelt; GitHub ser till att det godkänns.
 
 ## Inställningar
 
@@ -52,16 +55,9 @@ Tills tillägget finns i katalogen för community-tillägg:
 |---|---|---|
 | Godkänd gren | `main` | Grenen med den godkända versionen. |
 | Mappar | *(hela valvet)* | Kommaseparerade mappar som redigeras och skickas för godkännande, till exempel `qms`. Ändringar på andra ställen lämnas orörda. |
-| Prefix för utkastgrenar | `draft/` | Utkast får namnet `draft/<anteckning>-<ååmmdd-ttmm>`. |
+| Prefix för utkastgrenar | `draft/` | Utkast får namnet `draft/<dokument>-<ååmmdd-ttmmss>`. |
 | Språk | Auto | Engelska eller svenska. Auto följer Obsidians språk. |
 | Sökväg till git / gh | *(automatiskt)* | Behövs bara om de är installerade på ett ovanligt ställe. |
-
-## Rekommenderad inställning av repot
-
-Review Flow gör flödet enkelt. Det tvingar inte fram godkännande; det gör GitHub:
-
-- Skydda den godkända grenen: kräv pull request och minst ett godkännande.
-- Lägg `.obsidian/workspace*.json` i `.gitignore`, så att fönsterlayouter inte hamnar i commits.
 
 ## Begränsningar
 
@@ -71,7 +67,7 @@ Review Flow gör flödet enkelt. Det tvingar inte fram godkännande; det gör Gi
 
 ## Integritet
 
-Review Flow har ingen telemetri och gör inga egna nätverksanrop. Det kör `git` och `gh`, som bara pratar med repots fjärrrepo på GitHub. Grennamn byggs av anteckningens namn och tiden, inte av ditt användarnamn.
+Review Flow har ingen telemetri och gör inga egna nätverksanrop. Det kör `git` och `gh`, som bara pratar med repots fjärrrepo på GitHub. Grennamn byggs av dokumentets namn och tiden, inte av ditt användarnamn. Första gången, om git saknar namn eller e-post för repot, sätter Review Flow ditt GitHub-namn och GitHubs privata noreply-adress för just det repot, så att din riktiga e-postadress inte hamnar i historiken.
 
 ## Utveckling
 

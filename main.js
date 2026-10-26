@@ -7,7 +7,7 @@
 
 const obsidian = require('obsidian');
 const { Plugin, ItemView, Notice, Modal, Setting, PluginSettingTab, FileSystemAdapter } = obsidian;
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const nodePath = require('path');
 
 const VIEW_TYPE = 'review-flow';
@@ -48,6 +48,21 @@ const STRINGS = {
     refresh: 'Refresh',
     busy: 'Working…',
     deleted: 'deleted',
+    setupGitTitle: 'Install git',
+    setupGitText: 'On a Mac, a window asks to install the command line developer tools: click Install. On Windows, install Git from git-scm.com. Then click Try again.',
+    setupGhTitle: 'Install the GitHub tool',
+    setupGhText: 'Review Flow uses the GitHub CLI to send changes for approval. Download it, run the installer, then click Try again.',
+    setupGhDownload: 'Download GitHub CLI',
+    setupLoginTitle: 'Sign in to GitHub',
+    setupLoginText: 'Needed once, so you can send changes for approval.',
+    setupLoginButton: 'Sign in to GitHub',
+    setupCodeText: 'Your code is copied. Paste it on the GitHub page and approve.',
+    setupOpenGithub: 'Open GitHub',
+    setupWaiting: 'Waiting for you to approve in the browser…',
+    setupFailed: 'Sign-in did not finish. Try again.',
+    setupDone: 'You are signed in to GitHub.',
+    hintAttachments: (folders) => `New images and attachments are saved outside ${folders} and are not sent along. Ask whoever set up the vault to choose Settings → Files and links → Default location for new attachments → In subfolder under current folder.`,
+    hintWikilinks: 'Images in [[wikilinks]] do not show on GitHub, where the change is reviewed. Turn off Settings → Files and links → Use [[Wikilinks]].',
     draftCreated: (n) => `A draft was created: ${n}. Your changes stay there until they are approved.`,
     nothingToSend: 'Nothing to send. Make a change first.',
     sendTitle: 'Send for approval',
@@ -76,7 +91,7 @@ const STRINGS = {
     setFolders: 'Folders',
     setFoldersDesc: 'Comma-separated folders (relative to the vault) that are edited and sent for approval. Empty means the whole vault.',
     setPrefix: 'Draft branch prefix',
-    setPrefixDesc: 'Draft branches are named <prefix><document>-<date>.',
+    setPrefixDesc: 'Draft branches are named <prefix><document>-<date>-<time>.',
     setLanguage: 'Language',
     setLanguageDesc: 'Reload Obsidian after changing.',
     setGit: 'Path to git',
@@ -105,6 +120,21 @@ const STRINGS = {
     refresh: 'Uppdatera',
     busy: 'Arbetar…',
     deleted: 'borttaget',
+    setupGitTitle: 'Installera git',
+    setupGitText: 'På Mac visar macOS en ruta om kommandoradsverktyg: klicka på Installera. På Windows: installera Git från git-scm.com. Tryck sedan på Försök igen.',
+    setupGhTitle: 'Installera GitHub-verktyget',
+    setupGhText: 'Review Flow använder GitHub CLI för att skicka ändringar för godkännande. Ladda ner det, kör installationen och tryck sedan på Försök igen.',
+    setupGhDownload: 'Ladda ner GitHub CLI',
+    setupLoginTitle: 'Logga in på GitHub',
+    setupLoginText: 'Behövs en gång, för att du ska kunna skicka ändringar för godkännande.',
+    setupLoginButton: 'Logga in på GitHub',
+    setupCodeText: 'Koden är kopierad. Klistra in den på GitHub-sidan och godkänn.',
+    setupOpenGithub: 'Öppna GitHub',
+    setupWaiting: 'Väntar på att du godkänner i webbläsaren…',
+    setupFailed: 'Inloggningen blev inte klar. Försök igen.',
+    setupDone: 'Du är inloggad på GitHub.',
+    hintAttachments: (folders) => `Nya bilder och bilagor sparas utanför ${folders} och skickas inte med. Be den som satt upp valvet välja Inställningar → Filer och länkar → Standardplats för nya bilagor → I undermapp under aktuell mapp.`,
+    hintWikilinks: 'Bilder i [[wikilänkar]] syns inte på GitHub, där ändringen granskas. Slå av Inställningar → Filer och länkar → Använd [[wikilänkar]].',
     draftCreated: (n) => `Ett utkast skapades: ${n}. Ändringarna stannar där tills de har godkänts.`,
     nothingToSend: 'Inget att skicka. Gör en ändring först.',
     sendTitle: 'Skicka för godkännande',
@@ -133,7 +163,7 @@ const STRINGS = {
     setFolders: 'Mappar',
     setFoldersDesc: 'Kommaseparerade mappar (relativt valvet) som redigeras och skickas för godkännande. Tomt betyder hela valvet.',
     setPrefix: 'Prefix för utkastgrenar',
-    setPrefixDesc: 'Utkastgrenar får namnet <prefix><dokument>-<datum>.',
+    setPrefixDesc: 'Utkastgrenar får namnet <prefix><dokument>-<datum>-<tid>.',
     setLanguage: 'Språk',
     setLanguageDesc: 'Starta om Obsidian efter ändring.',
     setGit: 'Sökväg till git',
@@ -161,11 +191,22 @@ function slugify(s) {
 
 function stamp(d = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
-  return `${String(d.getFullYear()).slice(2)}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+  return `${String(d.getFullYear()).slice(2)}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
 function baseName(p) {
   return p.split('/').pop();
+}
+
+function safeUrl(url) {
+  return /^https:\/\//.test(url || '') ? url : null;
+}
+
+// Finds the one-time code and device URL in the output of `gh auth login --web`.
+function parseLogin(out) {
+  const code = out.match(/\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/);
+  const url = out.match(/https:\/\/github\.com\/login\/device\S*/);
+  return { code: code ? code[1] : null, url: url ? url[0] : null };
 }
 
 function lines(out) {
@@ -189,20 +230,32 @@ function summarize(files) {
   return names.slice(0, 3).join(', ') + (names.length > 3 ? ` (+${names.length - 3})` : '');
 }
 
-// Runs git or gh in `cwd`. GUI apps on macOS do not get the shell PATH, so common install locations are added.
+// The git or gh binary to run. A custom path is only used when it really points at git or gh,
+// so a settings file shipped with a vault cannot make the plugin run another program.
+function toolCommand(tool, settings) {
+  const custom = tool === 'git' ? settings.gitPath : settings.ghPath;
+  const name = custom ? nodePath.basename(custom).toLowerCase() : '';
+  return name === tool || name === `${tool}.exe` ? custom : tool;
+}
+
+// GUI apps on macOS do not get the shell PATH, so common install locations are added. Prompts are turned off.
+function toolEnv() {
+  const extra = process.platform === 'win32' ? [] : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
+  return {
+    ...process.env,
+    PATH: [process.env.PATH, ...extra].filter(Boolean).join(nodePath.delimiter),
+    GIT_TERMINAL_PROMPT: '0',
+    GH_PROMPT_DISABLED: '1',
+    GH_NO_UPDATE_NOTIFIER: '1',
+  };
+}
+
+// Runs git or gh in `cwd`.
 function makeExec(getCwd, getSettings) {
   return (tool, args) => {
-    const s = getSettings();
-    const cmd = tool === 'git' ? (s.gitPath || 'git') : (s.ghPath || 'gh');
+    const cmd = toolCommand(tool, getSettings());
     const fullArgs = tool === 'git' ? ['-c', 'core.quotePath=false', ...args] : args;
-    const extra = process.platform === 'win32' ? [] : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
-    const env = {
-      ...process.env,
-      PATH: [process.env.PATH, ...extra].filter(Boolean).join(nodePath.delimiter),
-      GIT_TERMINAL_PROMPT: '0',
-      GH_PROMPT_DISABLED: '1',
-      GH_NO_UPDATE_NOTIFIER: '1',
-    };
+    const env = toolEnv();
     return new Promise((resolve, reject) => {
       execFile(cmd, fullArgs, { cwd: getCwd(), env, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
@@ -224,6 +277,7 @@ class GitFlow {
     this.exec = exec;
     this.getSettings = getSettings;
     this.t = t;
+    this.excluded = ['.obsidian', '.trash'];
   }
 
   get s() {
@@ -242,9 +296,15 @@ class GitFlow {
     return this.exec('gh', args);
   }
 
+  // Folders in scope (vault-relative). Use pathspecs() for git commands.
   paths() {
     const f = this.s.folders.split(',').map((x) => x.trim().replace(/^\/+|\/+$/g, '')).filter(Boolean);
     return f.length ? f : ['.'];
+  }
+
+  // The folders in scope, never Obsidian's own config folder or trash (they must not be committed or cleaned).
+  pathspecs() {
+    return [...this.paths(), ...this.excluded.map((x) => `:(exclude)${x}`)];
   }
 
   isDraft(branch) {
@@ -253,12 +313,41 @@ class GitFlow {
 
   // A readable name for a draft branch: the document part without prefix and date.
   draftName(branch) {
-    return branch.slice(this.s.branchPrefix.length).replace(/-\d{6}-\d{4}$/, '');
+    return branch.slice(this.s.branchPrefix.length).replace(/-\d{6}-\d{4}(\d{2})?$/, '');
+  }
+
+  // The first missing piece of the setup: 'git', 'gh' or 'login'; null when everything is in place.
+  async setupStep() {
+    for (const [step, check] of [
+      ['git', () => this.git('--version')],
+      ['gh', () => this.gh('--version')],
+      ['login', () => this.gh('auth', 'status', '--hostname', 'github.com')],
+    ]) {
+      try {
+        await check();
+      } catch (e) {
+        return step;
+      }
+    }
+    return null;
+  }
+
+  // Lets git use the GitHub login for https remotes, and gives git a name and a private email
+  // (GitHub's noreply address) when none is set.
+  async finishSetup() {
+    const url = await this.git('remote', 'get-url', 'origin').catch(() => '');
+    if (/^https:/.test(url)) await this.gh('auth', 'setup-git', '--hostname', 'github.com');
+    const has = (key) => this.git('config', key).then((v) => !!v, () => false);
+    const [name, email] = [await has('user.name'), await has('user.email')];
+    if (name && email) return;
+    const user = JSON.parse(await this.gh('api', 'user'));
+    if (!name) await this.git('config', 'user.name', user.name || user.login);
+    if (!email) await this.git('config', 'user.email', `${user.id}+${user.login}@users.noreply.github.com`);
   }
 
   async state() {
     const branch = await this.git('branch', '--show-current');
-    const changes = parseStatus(await this.git('status', '--porcelain', '-z', '--untracked-files=all', '--', ...this.paths()));
+    const changes = parseStatus(await this.git('status', '--porcelain', '-z', '--untracked-files=all', '--', ...this.pathspecs()));
     return { branch, onBase: branch === this.base, isDraft: this.isDraft(branch), changes };
   }
 
@@ -269,7 +358,7 @@ class GitFlow {
 
   // Vault-relative paths changed in a draft compared with the approved version.
   async filesInDraft(branch) {
-    return lines(await this.git('diff', '--name-only', '--relative', `${this.base}...${branch}`, '--', ...this.paths()));
+    return lines(await this.git('diff', '--name-only', '--relative', `${this.base}...${branch}`, '--', ...this.pathspecs()));
   }
 
   // Details about the current draft: files changed since the approved version, and whether anything is not uploaded.
@@ -355,7 +444,7 @@ class GitFlow {
       created = `${this.s.branchPrefix}${slugify(baseName(st.changes[0]).replace(/\.md$/, ''))}-${stamp()}`;
       await this.git('switch', '-c', created);
     }
-    await this.git('add', '-A', '--', ...this.paths());
+    await this.git('add', '-A', '--', ...this.pathspecs());
     await this.git('commit', '-m', this.t('commitMsg', summarize(st.changes)));
     const pushed = await this.push(false);
     return { saved: true, created, pushed, branch: created || st.branch };
@@ -404,7 +493,7 @@ class GitFlow {
     const st = await this.state();
     if (!st.isDraft) throw new FlowError('errNotOnDraft');
     await this.git('reset', '--hard', 'HEAD');
-    await this.git('clean', '-fd', '--', ...this.paths());
+    await this.git('clean', '-fd', '--', ...this.pathspecs());
     await this.git('switch', this.base);
     await this.git('branch', '-D', st.branch);
     try {
@@ -516,6 +605,8 @@ class ChangesView extends ItemView {
     el.addClass('review-flow-panel');
     if (!s) return;
 
+    if (s.setup) return this.renderSetup(el, s.setup);
+
     if (s.error) {
       el.createDiv({ cls: 'review-flow-error', text: p.describeError(s.error) });
       this.button(el, t('retry'), () => p.refresh());
@@ -540,6 +631,8 @@ class ChangesView extends ItemView {
       return;
     }
 
+    for (const hint of p.attachmentHints(s.files)) el.createDiv({ cls: 'review-flow-hint', text: hint });
+
     const files = s.files;
     if (!files.length) {
       el.createDiv({ cls: 'review-flow-heading', text: s.isDraft ? t('draftEmpty') : t('noChanges') });
@@ -554,9 +647,9 @@ class ChangesView extends ItemView {
     if (s.isDraft && files.length) {
       const status = el.createDiv({ cls: 'review-flow-sub' });
       status.setText(waiting ? t(s.unpushed ? 'waitingChanged' : 'waiting') : t('notSent'));
-      if (waiting) {
+      if (waiting && safeUrl(pr.url)) {
         status.createSpan({ text: ' · ' });
-        status.createEl('a', { text: t('viewOnGithub'), href: pr.url });
+        status.createEl('a', { text: t('viewOnGithub'), href: safeUrl(pr.url) });
       }
     }
 
@@ -586,6 +679,38 @@ class ChangesView extends ItemView {
     if (p.busy) el.createDiv({ cls: 'review-flow-sub', text: t('busy') });
   }
 
+  // First-time setup: one step at a time, with the action for that step.
+  renderSetup(el, step) {
+    const p = this.plugin;
+    const t = (k) => p.t(k);
+    const retry = () => p.refresh(true);
+    if (step === 'git') {
+      el.createDiv({ cls: 'review-flow-heading', text: t('setupGitTitle') });
+      el.createDiv({ cls: 'review-flow-sub', text: t('setupGitText') });
+      this.button(el, t('retry'), retry, true);
+    } else if (step === 'gh') {
+      el.createDiv({ cls: 'review-flow-heading', text: t('setupGhTitle') });
+      el.createDiv({ cls: 'review-flow-sub', text: t('setupGhText') });
+      this.button(el, t('setupGhDownload'), () => window.open('https://cli.github.com'), true);
+      this.button(el, t('retry'), retry);
+    } else if (step === 'login') {
+      el.createDiv({ cls: 'review-flow-heading', text: t('setupLoginTitle') });
+      const login = p.login;
+      if (!login) {
+        el.createDiv({ cls: 'review-flow-sub', text: t('setupLoginText') });
+        if (p.loginFailed) el.createDiv({ cls: 'review-flow-error', text: t('setupFailed') });
+        this.button(el, t('setupLoginButton'), () => p.startLogin(), true);
+      } else if (!login.code) {
+        el.createDiv({ cls: 'review-flow-sub', text: t('busy') });
+      } else {
+        el.createDiv({ cls: 'review-flow-code', text: login.code });
+        el.createDiv({ cls: 'review-flow-sub', text: t('setupCodeText') });
+        this.button(el, t('setupOpenGithub'), () => p.openLoginPage(), true);
+        el.createDiv({ cls: 'review-flow-sub', text: t('setupWaiting') });
+      }
+    }
+  }
+
   button(el, text, onClick, cta) {
     const b = el.createEl('button', { cls: 'review-flow-main' + (cta ? ' mod-cta' : ''), text });
     b.disabled = this.plugin.busy;
@@ -608,6 +733,7 @@ class ReviewFlowPlugin extends Plugin {
       () => this.settings,
       (k, ...a) => this.t(k, ...a)
     );
+    this.flow.excluded = [this.app.vault.configDir, '.trash'];
 
     this.registerView(VIEW_TYPE, (leaf) => new ChangesView(leaf, this));
 
@@ -664,9 +790,30 @@ class ReviewFlowPlugin extends Plugin {
     return folders.includes('.') || folders.some((f) => path === f || path.startsWith(f + '/'));
   }
 
+  // Obsidian settings that would leave images out of the review. Uses Obsidian's internal config getter when present.
+  attachmentHints(files) {
+    const vault = this.app.vault;
+    const get = (k) => (typeof vault.getConfig === 'function' ? vault.getConfig(k) : undefined);
+    const hints = [];
+    const folder = get('attachmentFolderPath');
+    if (folder !== undefined && !this.flow.paths().includes('.')) {
+      const f = String(folder || '/').replace(/\/+$/, '');
+      const inside = f === '.' || f.startsWith('./') || (f !== '' && this.inScope(`${f}/x`));
+      if (!inside) hints.push(this.t('hintAttachments', this.flow.paths().join(', ')));
+    }
+    if (get('useMarkdownLinks') === false && files.some((f) => !f.endsWith('.md'))) hints.push(this.t('hintWikilinks'));
+    return hints;
+  }
+
   // ----- State -----
 
-  async loadState() {
+  async loadState(recheck) {
+    if (recheck || !this.setupChecked) {
+      const step = await this.flow.setupStep();
+      if (step) return { setup: step };
+      this.setupChecked = true;
+      await this.flow.finishSetup().catch((e) => console.error('Review Flow setup', e));
+    }
     const st = await this.flow.state();
     st.drafts = await this.flow.drafts();
     if (st.isDraft) Object.assign(st, await this.flow.draftInfo());
@@ -679,15 +826,15 @@ class ReviewFlowPlugin extends Plugin {
     this.refreshTimer = window.setTimeout(() => this.refresh(), 800);
   }
 
-  async refresh() {
+  async refresh(recheck) {
     if (this.busy) return;
     try {
-      this.state = await this.loadState();
+      this.state = await this.loadState(recheck === true);
     } catch (e) {
       this.state = { error: e };
     }
     this.render();
-    if (Date.now() - this.lastCleanup > CLEANUP_INTERVAL && this.state && !this.state.error) {
+    if (Date.now() - this.lastCleanup > CLEANUP_INTERVAL && this.state && !this.state.error && !this.state.setup) {
       this.lastCleanup = Date.now();
       if (await this.flow.cleanupMerged().catch(() => false)) this.refresh();
     }
@@ -715,6 +862,46 @@ class ReviewFlowPlugin extends Plugin {
       this.prLoading.delete(branch);
     }
     this.render();
+  }
+
+  // Signs in with `gh auth login --web`: shows the one-time code in the panel and opens GitHub's device page.
+  startLogin() {
+    if (this.login) return;
+    this.loginFailed = false;
+    const login = (this.login = { code: null, url: 'https://github.com/login/device' });
+    const args = ['auth', 'login', '--web', '--hostname', 'github.com', '--git-protocol', 'https', '--skip-ssh-key'];
+    const child = spawn(toolCommand('gh', this.settings), args, { cwd: this.vaultPath(), env: toolEnv() });
+    let out = '';
+    const onData = (chunk) => {
+      out += String(chunk);
+      const found = parseLogin(out);
+      if (found.url) login.url = found.url;
+      if (found.code && !login.code) {
+        login.code = found.code;
+        navigator.clipboard.writeText(login.code).catch(() => {});
+        this.openLoginPage();
+        this.render();
+      }
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.on('error', () => {
+      this.login = null;
+      this.loginFailed = true;
+      this.refresh(true);
+    });
+    child.on('close', async (exitCode) => {
+      this.login = null;
+      this.loginFailed = exitCode !== 0;
+      if (exitCode === 0) new Notice(this.t('setupDone'));
+      this.setupChecked = false;
+      this.refresh(true);
+    });
+    this.render();
+  }
+
+  openLoginPage() {
+    if (this.login && safeUrl(this.login.url)) window.open(this.login.url);
   }
 
   // Typing in the approved version moves the change into a new draft right away.
@@ -747,7 +934,7 @@ class ReviewFlowPlugin extends Plugin {
     const msg = `${e.stderr || ''} ${e.message || ''}`;
     if (e.code === 'ENOENT') return this.t(e.tool === 'gh' ? 'errNoGh' : 'errNoGit');
     if (/not a git repository/i.test(msg)) return this.t('errNotRepo');
-    if (/gh auth login|authentication|not logged/i.test(msg)) return this.t('errGhAuth');
+    if (/gh auth login|authentication|not logged|could not read username/i.test(msg)) return this.t('errGhAuth');
     if (/could not resolve host|unable to access|could not read from remote|network/i.test(msg)) return this.t('errOffline');
     if (/tell me who you are|user\.email/i.test(msg)) return this.t('errIdentity');
     if (/would be overwritten|untracked working tree files/i.test(msg)) return this.t('errConflict');
@@ -767,6 +954,7 @@ class ReviewFlowPlugin extends Plugin {
       await action();
     } catch (e) {
       console.error('Review Flow', e);
+      if (this.describeError(e) === this.t('errGhAuth')) this.setupChecked = false; // show the sign-in step again
       new Notice(this.describeError(e), 10000);
     } finally {
       this.busy = false;
@@ -796,7 +984,7 @@ class ReviewFlowPlugin extends Plugin {
         this.prCache.delete(r.branch);
         const frag = createFragment((f) => {
           f.createSpan({ text: this.t(r.updated ? 'resent' : 'sent') + ' ' });
-          f.createEl('a', { text: this.t('viewOnGithub'), href: r.url });
+          if (safeUrl(r.url)) f.createEl('a', { text: this.t('viewOnGithub'), href: safeUrl(r.url) });
         });
         new Notice(frag, 15000);
       };
@@ -851,4 +1039,4 @@ class ReviewFlowSettingTab extends PluginSettingTab {
 
 module.exports = ReviewFlowPlugin;
 module.exports.default = ReviewFlowPlugin;
-Object.assign(module.exports, { GitFlow, FlowError, STRINGS, makeExec, slugify, parseStatus });
+Object.assign(module.exports, { GitFlow, FlowError, STRINGS, makeExec, toolCommand, slugify, parseStatus, parseLogin, safeUrl });

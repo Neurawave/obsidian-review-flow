@@ -12,7 +12,7 @@ const load = Module._load;
 Module._load = function (request, ...rest) {
   return request === 'obsidian' ? new Proxy({}, { get: () => class {} }) : load.call(this, request, ...rest);
 };
-const { GitFlow, STRINGS, makeExec, slugify, parseStatus } = require('../main.js');
+const { GitFlow, STRINGS, makeExec, slugify, parseStatus, parseLogin, safeUrl } = require('../main.js');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'review-flow-'));
 const remote = path.join(tmp, 'remote.git');
@@ -38,7 +38,7 @@ const settings = {
   folders: 'qms',
   branchPrefix: 'draft/',
   gitPath: '',
-  ghPath: path.join(__dirname, 'fake-gh.js'),
+  ghPath: path.join(__dirname, 'bin', 'gh'),
 };
 const strings = STRINGS.sv;
 const t = (k, ...a) => (typeof strings[k] === 'function' ? strings[k](...a) : strings[k]);
@@ -64,6 +64,14 @@ test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 test('helpers', () => {
   assert.strictEqual(slugify('SOP-001 Dokumentstyrning för ÅÄÖ'), 'sop-001-dokumentstyrning-for-aao');
   assert.strictEqual(slugify('!!!'), 'draft');
+  assert.deepStrictEqual(
+    parseLogin('\n! One-time code (4F2A-9C1B) copied to clipboard\nOpen this URL to continue in your web browser: https://github.com/login/device\n'),
+    { code: '4F2A-9C1B', url: 'https://github.com/login/device' }
+  );
+  assert.deepStrictEqual(parseLogin('Logging in...'), { code: null, url: null });
+  assert.strictEqual(safeUrl('https://github.com/x/y/pull/1'), 'https://github.com/x/y/pull/1');
+  assert.strictEqual(safeUrl('javascript:alert(1)'), null);
+  assert.strictEqual(safeUrl('file:///etc/passwd'), null);
   assert.deepStrictEqual(parseStatus(' M qms/a.md\0?? qms/b c.md\0R  qms/new.md\0qms/old.md\0'), ['qms/a.md', 'qms/b c.md', 'qms/new.md']);
 });
 
@@ -76,7 +84,7 @@ let draft;
 
 test('Edit creates a draft branch', async () => {
   draft = await flow.startDraft('SOP-001');
-  assert.match(draft, /^draft\/sop-001-\d{6}-\d{4}$/);
+  assert.match(draft, /^draft\/sop-001-\d{6}-\d{6}$/);
   assert.strictEqual(flow.draftName(draft), 'sop-001');
   assert.strictEqual((await flow.state()).isDraft, true);
 });
@@ -222,4 +230,97 @@ test('Save works offline and uploads later', async () => {
   assert.strictEqual(r.pushed, false);
   sh(vault, 'remote', 'set-url', 'origin', remote);
   assert.strictEqual(await flow.push(false), true);
+});
+
+test('a custom path is only used when it points at git or gh', async () => {
+  const run = (gitPath) => makeExec(() => vault, () => ({ gitPath, ghPath: '' }))('git', ['--version']);
+  assert.match(await run('/usr/bin/git'), /git version/);
+  assert.match(await run('/bin/echo'), /git version/, 'falls back to git instead of running echo');
+});
+
+test('with the whole vault in scope, Obsidian config and trash are never committed or cleaned', async () => {
+  const saved = settings.folders;
+  settings.folders = '';
+  try {
+    write('.obsidian/workspace.json', '{}\n');
+    write('.trash/old.md', 'old\n');
+    await flow.switchTo('main');
+    const name = await flow.startDraft('whole');
+    write('anteckning.md', 'hej\n');
+    assert.deepStrictEqual((await flow.state()).changes, ['anteckning.md']);
+    await flow.save();
+    assert.deepStrictEqual(sh(vault, 'show', '--name-only', '--format=', 'HEAD').split('\n'), ['anteckning.md']);
+    write('skräp.md', 'x\n');
+    await flow.discard();
+    assert.ok(fs.existsSync(path.join(vault, '.obsidian/workspace.json')));
+    assert.ok(fs.existsSync(path.join(vault, '.trash/old.md')));
+    assert.ok(!fs.existsSync(path.join(vault, 'skräp.md')));
+    assert.strictEqual(sh(vault, 'branch', '--list', name), '');
+  } finally {
+    settings.folders = saved;
+  }
+});
+
+test('images and attachments inside the folders are saved and sent like documents', async () => {
+  await flow.switchTo('main');
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4f50000000049454e44ae426082', 'hex');
+  const pdf = Buffer.from('%PDF-1.4\n%âãÏÓ\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n', 'latin1');
+  await flow.startDraft('SOP-001');
+  fs.mkdirSync(path.join(vault, 'qms/bilagor'), { recursive: true });
+  fs.writeFileSync(path.join(vault, 'qms/bilagor/Pasted image 20261026.png'), png);
+  fs.writeFileSync(path.join(vault, 'qms/bilagor/Intyg å.pdf'), pdf);
+  fs.writeFileSync(path.join(vault, 'Pasted image i roten.png'), png);
+  write('qms/SOP-001.md', read('qms/SOP-001.md') + '\n![](bilagor/Pasted%20image%2020261026.png)\n');
+
+  const info = await flow.draftInfo();
+  assert.deepStrictEqual(info.files.sort(), ['qms/SOP-001.md', 'qms/bilagor/Intyg å.pdf', 'qms/bilagor/Pasted image 20261026.png']);
+  const r = await flow.publish('Bild och intyg', '');
+  const pr = gh().prs.filter((x) => x.head === r.branch).pop();
+  assert.match(pr.body, /- qms\/bilagor\/Pasted image 20261026\.png/);
+  assert.match(pr.body, /- qms\/bilagor\/Intyg å\.pdf/);
+  const committed = sh(vault, '-c', 'core.quotePath=false', 'show', '--name-only', '--format=', r.branch).split('\n').sort();
+  assert.deepStrictEqual(committed, ['qms/SOP-001.md', 'qms/bilagor/Intyg å.pdf', 'qms/bilagor/Pasted image 20261026.png']);
+  assert.ok(sh(vault, 'cat-file', '-p', `${r.branch}:qms/bilagor/Pasted image 20261026.png`).length > 0);
+  assert.ok(fs.existsSync(path.join(vault, 'Pasted image i roten.png')), 'files outside the folders are left alone');
+  fs.rmSync(path.join(vault, 'Pasted image i roten.png'));
+});
+
+test('first-time setup finds the missing step', async () => {
+  assert.strictEqual(await flow.setupStep(), null);
+  process.env.FAKE_GH_LOGGED_OUT = '1';
+  try {
+    assert.strictEqual(await flow.setupStep(), 'login');
+  } finally {
+    delete process.env.FAKE_GH_LOGGED_OUT;
+  }
+  const saved = settings.ghPath;
+  settings.ghPath = path.join(tmp, 'no-such-dir', 'gh');
+  const savedPath = process.env.PATH;
+  process.env.PATH = '/nonexistent';
+  try {
+    assert.strictEqual(await flow.setupStep(), 'gh');
+  } finally {
+    settings.ghPath = saved;
+    process.env.PATH = savedPath;
+  }
+});
+
+test('after sign-in, git gets a name and the GitHub noreply email when none is set', async () => {
+  const clean = path.join(tmp, 'no-identity');
+  execFileSync('git', ['clone', '-q', remote, clean]);
+  const savedGlobal = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = path.join(tmp, 'empty-gitconfig');
+  fs.writeFileSync(process.env.GIT_CONFIG_GLOBAL, '');
+  try {
+    const f = new GitFlow(makeExec(() => clean, () => settings), () => settings, t);
+    await f.finishSetup();
+    assert.strictEqual(sh(clean, 'config', 'user.name'), 'Test Person');
+    assert.strictEqual(sh(clean, 'config', 'user.email'), '42+tester@users.noreply.github.com');
+    sh(clean, 'config', 'user.name', 'Kept');
+    await f.finishSetup();
+    assert.strictEqual(sh(clean, 'config', 'user.name'), 'Kept', 'an existing name is kept');
+  } finally {
+    if (savedGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = savedGlobal;
+  }
 });

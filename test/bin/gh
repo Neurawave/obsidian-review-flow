@@ -9,7 +9,21 @@ const save = () => fs.writeFileSync(file, JSON.stringify(db, null, 2));
 const opt = (name) => args[args.indexOf(name) + 1];
 const latest = (branch) => db.prs.filter((p) => p.head === branch).pop();
 
-if (args[0] === 'pr' && args[1] === 'view') {
+if (args[0] === '--version') {
+  save();
+  process.stdout.write('gh version 0.0.0 (fake)\n');
+} else if (args[0] === 'auth' && args[1] === 'status') {
+  save();
+  if (process.env.FAKE_GH_LOGGED_OUT) {
+    process.stderr.write('You are not logged into any GitHub hosts. To log in, run: gh auth login\n');
+    process.exit(1);
+  }
+} else if (args[0] === 'auth' && args[1] === 'setup-git') {
+  save();
+} else if (args[0] === 'api' && args[1] === 'user') {
+  save();
+  process.stdout.write(JSON.stringify({ login: 'tester', id: 42, name: 'Test Person' }) + '\n');
+} else if (args[0] === 'pr' && args[1] === 'view') {
   const pr = latest(args[2]);
   save();
   if (!pr) {

@@ -24,6 +24,27 @@
   color: var(--text-error);
 }
 
+.review-flow-hint {
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  background: rgba(var(--color-orange-rgb), 0.12);
+  border-left: 3px solid rgb(var(--color-orange-rgb));
+  border-radius: var(--radius-s);
+  padding: var(--size-4-2) var(--size-4-3);
+}
+
+.review-flow-code {
+  font-family: var(--font-monospace);
+  font-size: 1.6em;
+  font-weight: var(--font-bold);
+  letter-spacing: 0.1em;
+  text-align: center;
+  padding: var(--size-4-2);
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  user-select: all;
+}
+
 .review-flow-files {
   display: flex;
   flex-direction: column;
