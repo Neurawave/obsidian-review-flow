@@ -33,6 +33,11 @@
   padding: var(--size-4-2) var(--size-4-3);
 }
 
+.review-flow-panel button.review-flow-hint-button {
+  display: block;
+  margin-top: var(--size-4-2);
+}
+
 .review-flow-code {
   font-family: var(--font-monospace);
   font-size: 1.6em;

@@ -61,8 +61,10 @@ const STRINGS = {
     setupWaiting: 'Waiting for you to approve in the browser…',
     setupFailed: 'Sign-in did not finish. Try again.',
     setupDone: 'You are signed in to GitHub.',
-    hintAttachments: (folders) => `New images and attachments are saved outside ${folders} and are not sent along. Ask whoever set up the vault to choose Settings → Files and links → Default location for new attachments → In subfolder under current folder.`,
-    hintWikilinks: 'Images in [[wikilinks]] do not show on GitHub, where the change is reviewed. Turn off Settings → Files and links → Use [[Wikilinks]].',
+    hintImages: 'With the current Obsidian settings, images you paste are not included in the review.',
+    hintImagesManual: 'Choose Settings → Files and links → Default location for new attachments → In subfolder under current folder, and turn off Use [[Wikilinks]].',
+    fixImages: 'Fix the setting',
+    fixedImages: 'Images are now saved in an attachments folder next to the document, with links that show on GitHub.',
     draftCreated: (n) => `A draft was created: ${n}. Your changes stay there until they are approved.`,
     nothingToSend: 'Nothing to send. Make a change first.',
     sendTitle: 'Send for approval',
@@ -133,8 +135,10 @@ const STRINGS = {
     setupWaiting: 'Väntar på att du godkänner i webbläsaren…',
     setupFailed: 'Inloggningen blev inte klar. Försök igen.',
     setupDone: 'Du är inloggad på GitHub.',
-    hintAttachments: (folders) => `Nya bilder och bilagor sparas utanför ${folders} och skickas inte med. Be den som satt upp valvet välja Inställningar → Filer och länkar → Standardplats för nya bilagor → I undermapp under aktuell mapp.`,
-    hintWikilinks: 'Bilder i [[wikilänkar]] syns inte på GitHub, där ändringen granskas. Slå av Inställningar → Filer och länkar → Använd [[wikilänkar]].',
+    hintImages: 'Med Obsidians nuvarande inställningar följer bilder du klistrar in inte med till granskningen.',
+    hintImagesManual: 'Välj Inställningar → Filer och länkar → Standardplats för nya bilagor → I undermapp under aktuell mapp, och slå av Använd [[wikilänkar]].',
+    fixImages: 'Rätta inställningen',
+    fixedImages: 'Bilder sparas nu i mappen attachments bredvid dokumentet, med länkar som syns på GitHub.',
     draftCreated: (n) => `Ett utkast skapades: ${n}. Ändringarna stannar där tills de har godkänts.`,
     nothingToSend: 'Inget att skicka. Gör en ändring först.',
     sendTitle: 'Skicka för godkännande',
@@ -631,7 +635,15 @@ class ChangesView extends ItemView {
       return;
     }
 
-    for (const hint of p.attachmentHints(s.files)) el.createDiv({ cls: 'review-flow-hint', text: hint });
+    if (p.imagesNeedFix()) {
+      const hint = el.createDiv({ cls: 'review-flow-hint', text: t('hintImages') });
+      if (p.canFixImages()) {
+        const fix = hint.createEl('button', { cls: 'review-flow-hint-button', text: t('fixImages') });
+        fix.onclick = () => p.fixImages();
+      } else {
+        hint.createDiv({ text: t('hintImagesManual') });
+      }
+    }
 
     const files = s.files;
     if (!files.length) {
@@ -790,19 +802,34 @@ class ReviewFlowPlugin extends Plugin {
     return folders.includes('.') || folders.some((f) => path === f || path.startsWith(f + '/'));
   }
 
-  // Obsidian settings that would leave images out of the review. Uses Obsidian's internal config getter when present.
-  attachmentHints(files) {
+  // Obsidian settings that would leave pasted images out of the review: attachments saved outside the
+  // folders in scope, or [[wikilinks]] that GitHub does not show. Uses Obsidian's internal config API when present.
+  config(key) {
     const vault = this.app.vault;
-    const get = (k) => (typeof vault.getConfig === 'function' ? vault.getConfig(k) : undefined);
-    const hints = [];
-    const folder = get('attachmentFolderPath');
+    return typeof vault.getConfig === 'function' ? vault.getConfig(key) : undefined;
+  }
+
+  imagesNeedFix() {
+    const folder = this.config('attachmentFolderPath');
+    let outside = false;
     if (folder !== undefined && !this.flow.paths().includes('.')) {
       const f = String(folder || '/').replace(/\/+$/, '');
-      const inside = f === '.' || f.startsWith('./') || (f !== '' && this.inScope(`${f}/x`));
-      if (!inside) hints.push(this.t('hintAttachments', this.flow.paths().join(', ')));
+      outside = !(f === '.' || f.startsWith('./') || (f !== '' && this.inScope(`${f}/x`)));
     }
-    if (get('useMarkdownLinks') === false && files.some((f) => !f.endsWith('.md'))) hints.push(this.t('hintWikilinks'));
-    return hints;
+    return outside || this.config('useMarkdownLinks') === false;
+  }
+
+  canFixImages() {
+    return typeof this.app.vault.setConfig === 'function';
+  }
+
+  fixImages() {
+    const vault = this.app.vault;
+    vault.setConfig('attachmentFolderPath', './attachments');
+    vault.setConfig('useMarkdownLinks', true);
+    vault.setConfig('newLinkFormat', 'relative');
+    new Notice(this.t('fixedImages'), 8000);
+    this.render();
   }
 
   // ----- State -----

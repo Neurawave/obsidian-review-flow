@@ -6,6 +6,8 @@ Redigera Markdown-dokument i Obsidian och skicka ändringar för godkännande, u
 
 Review Flow är till för team som har sina dokument i ett git-repo på GitHub och godkänner varje ändring med en pull request, till exempel styrda dokument i ett kvalitetsledningssystem. Den som skriver får en panel med en huvudknapp. Git och GitHub sköter resten i bakgrunden.
 
+![Panelen Ändringar bredvid ett dokument i Obsidian](docs/screenshot.png)
+
 **Ny användare?** Följ [Kom igång](KOM-IGANG.md).
 
 > **Status: prototyp (0.1).** Git-flödet har automatiska tester. Användargränssnittet i Obsidian är provat för hand men ännu inte brett testat.
@@ -32,22 +34,21 @@ Det finns ingen Redigera- eller Spara-knapp:
 - [GitHub CLI](https://cli.github.com) (`gh`).
 - Valvet är ett git-repo klonat från GitHub (eller en mapp i ett).
 
-## Sätta upp ett repo
+## Installation
 
-Gör det här en gång per dokumentrepo, så får de som skriver allt när de klonar det. De som skriver följer sedan [Kom igång](KOM-IGANG.md).
+Tills Review Flow finns i Obsidians katalog för community-tillägg installerar du det med tillägget BRAT:
 
-1. Kopiera `main.js`, `manifest.json` och `styles.css` från en release till `.obsidian/plugins/review-flow/` i repot.
-2. Lägg till `.obsidian/plugins/review-flow/data.json` med mapparna som ska användas, till exempel:
-   ```json
-   { "folders": "qms", "baseBranch": "main" }
-   ```
-3. Lägg till `.obsidian/community-plugins.json` med innehållet `["review-flow"]`.
-4. Lägg till `.obsidian/app.json`, så att bilder sparas bredvid dokumentet och syns på GitHub:
-   ```json
-   { "attachmentFolderPath": "./attachments", "useMarkdownLinks": true, "newLinkFormat": "relative" }
-   ```
-5. Lägg `.obsidian/workspace*.json` i `.gitignore`, så att fönsterlayouter inte hamnar i commits.
-6. Skydda den godkända grenen på GitHub: kräv pull request och minst ett godkännande. Review Flow gör flödet enkelt; GitHub ser till att det godkänns.
+1. I Obsidian: **Inställningar → Community-tillägg**, slå på dem, välj **Bläddra**, sök efter **BRAT**, välj **Installera** och **Aktivera**.
+2. Öppna kommandopaletten (Cmd/Ctrl+P), välj **BRAT: Add a beta plugin for testing**, klistra in `Neurawave/obsidian-review-flow` och klicka på **Add plugin**.
+3. Under **Inställningar → Review Flow**, sätt **Mappar** till mapparna som redigeras, till exempel `qms`.
+
+Eller kopiera `main.js`, `manifest.json` och `styles.css` från [senaste releasen](https://github.com/Neurawave/obsidian-review-flow/releases) till `<valv>/.obsidian/plugins/review-flow/` och slå på tillägget.
+
+Inget behöver läggas till i dokumentrepot. Var och en installerar tillägget i sin egen Obsidian.
+
+Om inklistrade bilder inte skulle följa med i granskningen (de sparas utanför mapparna, eller länkas som `[[wikilänkar]]` som GitHub inte visar) säger panelen det och erbjuder en knapp som rättar inställningen.
+
+**Det är GitHub som kräver godkännande, inte tillägget.** Skydda den godkända grenen: kräv pull request och minst ett godkännande.
 
 ## Inställningar
 

@@ -6,6 +6,8 @@ Edit Markdown documents in Obsidian and send changes for approval, without havin
 
 Review Flow is for teams that keep documents in a git repository on GitHub and approve every change through a pull request, for example controlled documents in a quality management system. Writers get one panel with one main button. Git and GitHub do the rest in the background.
 
+![The Changes panel next to a document in Obsidian](docs/screenshot.png)
+
 **New here?** Follow [Getting started](GETTING-STARTED.md).
 
 > **Status: prototype (0.1).** The git flow has automated tests. The Obsidian user interface has been tried by hand but not widely yet.
@@ -32,22 +34,21 @@ There is no Edit or Save button:
 - The [GitHub CLI](https://cli.github.com) (`gh`).
 - The vault is a git repository cloned from GitHub (or a folder inside one).
 
-## Setting up a repository
+## Installation
 
-Do this once per documents repository, so writers get everything when they clone it. Writers then follow [Getting started](GETTING-STARTED.md).
+Until Review Flow is in Obsidian's community directory, install it with the BRAT plugin:
 
-1. Copy `main.js`, `manifest.json` and `styles.css` from a release into `.obsidian/plugins/review-flow/` in the repository.
-2. Add `.obsidian/plugins/review-flow/data.json` with the folders to use, for example:
-   ```json
-   { "folders": "qms", "baseBranch": "main" }
-   ```
-3. Add `.obsidian/community-plugins.json` containing `["review-flow"]`.
-4. Add `.obsidian/app.json`, so images are saved next to the document and show on GitHub:
-   ```json
-   { "attachmentFolderPath": "./attachments", "useMarkdownLinks": true, "newLinkFormat": "relative" }
-   ```
-5. Add `.obsidian/workspace*.json` to `.gitignore`, so window layouts are not committed.
-6. Protect the approved branch on GitHub: require a pull request and at least one approving review. Review Flow makes the flow easy; GitHub enforces approval.
+1. In Obsidian: **Settings → Community plugins**, turn them on, choose **Browse**, find **BRAT**, then **Install** and **Enable**.
+2. Open the command palette (Cmd/Ctrl+P), choose **BRAT: Add a beta plugin for testing**, paste `Neurawave/obsidian-review-flow` and click **Add plugin**.
+3. In **Settings → Review Flow**, set **Folders** to the folders people edit, for example `qms`.
+
+Or copy `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/Neurawave/obsidian-review-flow/releases) into `<vault>/.obsidian/plugins/review-flow/` and turn the plugin on.
+
+Nothing needs to be added to the documents repository. Each person installs the plugin in their own Obsidian.
+
+If pasted images would not be included in the review (they are saved outside the folders, or linked as `[[wikilinks]]` that GitHub does not show), the panel says so and offers a button that fixes the setting.
+
+**Approval is enforced by GitHub, not by the plugin.** Protect the approved branch: require a pull request and at least one approving review.
 
 ## Settings
 
