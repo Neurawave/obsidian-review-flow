@@ -1,0 +1,10 @@
+{
+  "id": "review-flow",
+  "name": "Review Flow",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Edit, save and publish notes for approval through GitHub pull requests – without seeing git.",
+  "author": "Neurawave",
+  "authorUrl": "https://github.com/neurawave",
+  "isDesktopOnly": true
+}
