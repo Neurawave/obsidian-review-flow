@@ -77,6 +77,7 @@ let draft;
 test('Edit creates a draft branch', async () => {
   draft = await flow.startDraft('SOP-001');
   assert.match(draft, /^draft\/sop-001-\d{6}-\d{4}$/);
+  assert.strictEqual(flow.draftName(draft), 'sop-001');
   assert.strictEqual((await flow.state()).isDraft, true);
 });
 
@@ -122,16 +123,15 @@ test('Publish opens a pull request and returns to the approved version', async (
   assert.ok(!read('qms/SOP-001.md').includes('| 3 | 4 |'), 'approved version is unchanged until merged');
 });
 
-test('the approved version knows which draft changes each document', async () => {
-  const map = await flow.draftsByFile();
-  assert.strictEqual(map.get('qms/SOP-001.md'), draft);
-  assert.strictEqual(map.get('qms/Rutin för ändring.md'), draft);
+test('the sent draft is listed with its pull request', async () => {
+  assert.deepStrictEqual(await flow.drafts(), [draft]);
+  assert.deepStrictEqual(await flow.filesInDraft(draft), ['qms/Rutin för ändring.md', 'qms/SOP-001.md']);
   assert.deepStrictEqual(await flow.prInfo(draft), { url: 'https://github.com/example/repo/pull/1', state: 'OPEN' });
 });
 
 test('Publishing again updates the same pull request', async () => {
   assert.deepStrictEqual(await flow.drafts(), [draft]);
-  await flow.openDraft(draft);
+  await flow.switchTo(draft);
   write('qms/SOP-001.md', read('qms/SOP-001.md') + '| 5 | 6 |\n');
   const r = await flow.publish('', '');
   assert.strictEqual(r.updated, true);
@@ -167,11 +167,29 @@ test('Save and close keeps a draft with changes', async () => {
   write('qms/SOP-001.md', read('qms/SOP-001.md') + 'Pågående.\n');
   await flow.backToBase();
   assert.strictEqual((await flow.state()).onBase, true);
-  assert.strictEqual((await flow.draftsByFile()).get('qms/SOP-001.md'), name);
+  assert.deepStrictEqual(await flow.drafts(), [name]);
   assert.ok(!read('qms/SOP-001.md').includes('Pågående.'));
-  await flow.openDraft(name);
+  await flow.switchTo(name);
   assert.ok(read('qms/SOP-001.md').includes('Pågående.'));
   await flow.discard();
+});
+
+test('switching between drafts saves the one you leave', async () => {
+  const a = await flow.startDraft('A');
+  write('qms/A.md', 'a\n');
+  await flow.switchTo('main');
+  write('qms/B.md', 'b\n');
+  const b = (await flow.save()).created;
+  write('qms/B.md', 'b2\n');
+  await flow.switchTo(a);
+  assert.strictEqual((await flow.state()).branch, a);
+  assert.ok(!fs.existsSync(path.join(vault, 'qms/B.md')));
+  await flow.switchTo(b);
+  assert.strictEqual(read('qms/B.md'), 'b2\n');
+  await flow.discard();
+  await flow.switchTo(a);
+  await flow.discard();
+  assert.deepStrictEqual(await flow.drafts(), []);
 });
 
 test('Save on the approved version moves the change into a new draft', async () => {

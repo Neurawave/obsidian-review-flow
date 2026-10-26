@@ -4,26 +4,24 @@
 
 Redigera Markdown-dokument i Obsidian och skicka ändringar för godkännande, utan att behöva kunna git.
 
-Review Flow är till för team som har sina dokument i ett git-repo på GitHub och godkänner varje ändring med en pull request, till exempel styrda dokument i ett kvalitetsledningssystem. Den som skriver får en knapp i taget. Git och GitHub sköter resten i bakgrunden.
+Review Flow är till för team som har sina dokument i ett git-repo på GitHub och godkänner varje ändring med en pull request, till exempel styrda dokument i ett kvalitetsledningssystem. Den som skriver får en panel med en huvudknapp. Git och GitHub sköter resten i bakgrunden.
 
 > **Status: prototyp (0.1).** Git-flödet har automatiska tester. Användargränssnittet i Obsidian är ännu inte brett testat.
 
 ## Så fungerar det
 
-Varje dokument i de inställda mapparna får en rad överst med **en enda huvudknapp**. Vad den säger beror på var du är:
+Review Flow lägger till panelen **Ändringar** i vänsterspalten. Det är det enda stället du behöver titta på:
 
-| Du ser | Huvudknapp | Det här händer |
-|---|---|---|
-| 📖 **Godkänd version** | **Redigera** | Hämtar den senaste godkända versionen och startar ett utkast (en gren) för dokumentet. |
-| 📖 **Godkänd version** – *du har ett utkast* | **Fortsätt redigera** | Öppnar ditt utkast för dokumentet igen. |
-| ✏️ **Utkast** | **Publicera** | Skickar utkastet för godkännande (en pull request) och visar den godkända versionen igen. |
-| ⏳ **Väntar på godkännande** | **Klar** | Tillbaka till den godkända versionen. Ändrar du mer blir knappen **Publicera ändringarna**. |
+- **Väljaren överst** visar var du är: *📖 Godkänd version* eller ett av dina utkast (*✏️ sop-001*). Välj ett annat utkast för att byta; det du står i sparas först. Utkast som väntar på godkännande visar det.
+- **Ändrade dokument** listas under den. Klicka på ett för att öppna det.
+- **En huvudknapp: Skicka för godkännande.** Den skickar utkastet för granskning som en pull request. Inget gäller förrän det har godkänts. När det är skickat visar panelen *Väntar på godkännande* med en länk till GitHub.
+- **Släng utkast** kastar utkastet.
 
-- Det finns ingen spara-knapp: Obsidian sparar medan du skriver. Publicera laddar upp allt.
-- Bredvid huvudknappen finns två små länkar: **Spara och stäng** (lämna utkastet till senare) och **Släng utkast**.
-- **Den godkända versionen är skrivskyddad**: dokument öppnas i läsläge tills du trycker på Redigera.
-- När en begäran har godkänts och slagits ihop tas utkastet bort nästa gång du trycker på Redigera.
-- Alla funktioner finns också i kommandopaletten.
+Det finns ingen Redigera- eller Spara-knapp:
+
+- Dokumenten är aldrig låsta. Börja skriva i den godkända versionen så skapas ett utkast automatiskt för din ändring.
+- Obsidian sparar medan du skriver. Byte av utkast eller Skicka laddar upp allt.
+- När en begäran har godkänts och slagits ihop försvinner utkastet ur väljaren.
 
 ## Krav
 
@@ -53,10 +51,9 @@ Tills tillägget finns i katalogen för community-tillägg:
 | Inställning | Standard | Betydelse |
 |---|---|---|
 | Godkänd gren | `main` | Grenen med den godkända versionen. |
-| Mappar | *(hela valvet)* | Kommaseparerade mappar som redigeras och publiceras, till exempel `qms`. Ändringar på andra ställen lämnas orörda. |
+| Mappar | *(hela valvet)* | Kommaseparerade mappar som redigeras och skickas för godkännande, till exempel `qms`. Ändringar på andra ställen lämnas orörda. |
 | Prefix för utkastgrenar | `draft/` | Utkast får namnet `draft/<anteckning>-<ååmmdd-ttmm>`. |
 | Språk | Auto | Engelska eller svenska. Auto följer Obsidians språk. |
-| Skrivskyddad godkänd version | På | Öppnar anteckningar i läsläge utanför utkast. |
 | Sökväg till git / gh | *(automatiskt)* | Behövs bara om de är installerade på ett ovanligt ställe. |
 
 ## Rekommenderad inställning av repot

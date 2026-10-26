@@ -1,67 +1,62 @@
 'use strict';
 
 // Review Flow – edit Markdown in Obsidian with a simple review flow on top of git.
-// Each note in scope gets a bar with one main action: Edit → Publish (pull request for approval).
+// A side panel lists your drafts (branches) and their changed documents, with one main action:
+// send for approval (a pull request). Typing in the approved version starts a draft automatically.
 // Plain JavaScript, no build step. Desktop only (uses git and the GitHub CLI `gh`).
 
 const obsidian = require('obsidian');
-const { Plugin, Notice, Modal, Setting, PluginSettingTab, MarkdownView, FileSystemAdapter } = obsidian;
+const { Plugin, ItemView, Notice, Modal, Setting, PluginSettingTab, FileSystemAdapter } = obsidian;
 const { execFile } = require('child_process');
 const nodePath = require('path');
+
+const VIEW_TYPE = 'review-flow';
+const PR_MAX_AGE = 60000;
+const CLEANUP_INTERVAL = 120000;
 
 const DEFAULT_SETTINGS = {
   baseBranch: 'main',
   folders: '',
   branchPrefix: 'draft/',
   language: 'auto',
-  lockBase: true,
   gitPath: '',
   ghPath: '',
 };
-
-const PR_MAX_AGE = 60000;
 
 // ---------- Strings ----------
 
 const STRINGS = {
   en: {
-    edit: 'Edit',
-    continueEdit: 'Continue editing',
-    publish: 'Publish',
-    publishChanges: 'Publish changes',
-    saveAndClose: 'Save and close',
-    save: 'Save draft',
+    panelTitle: 'Changes',
+    showPanel: 'Show changes',
+    approvedOption: '📖 Approved version',
+    draftOption: (name, waiting) => `✏️ ${name}` + (waiting ? ' · waiting for approval' : ''),
+    otherOption: (b) => `⎇ ${b}`,
+    noChanges: 'No changes',
+    noChangesSub: 'Start typing in a document and a draft is created automatically.',
+    otherSub: 'You are looking at a version other than the approved one.',
+    draftHeading: (n) => `Draft · ${n} changed ${n === 1 ? 'document' : 'documents'}`,
+    draftEmpty: 'Draft · no changes yet',
+    notSent: 'Not sent for approval yet.',
+    waiting: '⏳ Waiting for approval',
+    waitingChanged: '⏳ Waiting for approval · new changes not sent yet',
+    send: 'Send for approval',
+    sendChanges: 'Send the changes',
     discard: 'Discard draft',
-    done: 'Done',
     viewOnGithub: 'View on GitHub',
-    showApproved: 'Show approved version',
     retry: 'Try again',
     refresh: 'Refresh',
     busy: 'Working…',
-    approvedTitle: '📖 Approved version',
-    approvedSub: 'This is the version in effect.',
-    approvedDraftSub: 'You have a draft with changes to this document.',
-    approvedWaitingSub: 'Your change is waiting for approval.',
-    draftTitle: (n) => '✏️ Draft' + (n ? ` · ${n} changed ${n === 1 ? 'document' : 'documents'}` : ''),
-    draftSub: 'Your changes are saved automatically. They take effect once they have been approved.',
-    draftEmptySub: 'Make your changes in the document.',
-    waitingTitle: '⏳ Waiting for approval',
-    waitingSub: 'If you change more, publish again.',
-    otherTitle: (b) => `⎇ ${b}`,
-    otherSub: 'You are looking at a version other than the approved one.',
-    errorTitle: '⚠ Review Flow cannot work here',
-    locked: 'This is the approved version. Click Edit to make changes.',
-    nothingToSave: 'No changes to save.',
-    saved: 'Saved.',
-    savedLocal: 'Saved on this computer only (no connection). It is uploaded the next time.',
-    nothingToPublish: 'Nothing to publish. Make a change first.',
-    publishTitle: 'Publish for approval',
-    publishIntro: 'Your changes are sent for review. They take effect when they have been approved.',
+    deleted: 'deleted',
+    draftCreated: (n) => `A draft was created: ${n}. Your changes stay there until they are approved.`,
+    nothingToSend: 'Nothing to send. Make a change first.',
+    sendTitle: 'Send for approval',
+    sendIntro: 'The documents are sent for review. The changes take effect once they have been approved.',
     fieldTitle: 'What did you change?',
     fieldBody: 'More details (optional)',
     cancel: 'Cancel',
-    published: 'Sent for approval. The change shows here once it has been approved.',
-    republished: 'The approval request is updated with your latest changes.',
+    sent: 'Sent for approval. The change takes effect once it has been approved.',
+    resent: 'The changes have been sent.',
     discardConfirm: 'Discard this draft? All changes in it are deleted and any open approval request is closed. This cannot be undone.',
     discarded: 'The draft was discarded.',
     commitMsg: (files) => `Draft: ${files}`,
@@ -73,61 +68,52 @@ const STRINGS = {
     errNotRepo: 'This vault is not inside a git repository.',
     errOffline: 'Could not reach GitHub. Check your connection and try again.',
     errIdentity: 'Git does not know who you are. Run “gh auth setup-git” or set git user.name and user.email.',
-    errConflict: 'Could not switch: there are unsaved changes that would be overwritten. Save or discard the draft first.',
-    errNotOnDraft: 'You are not in a draft. Click Edit first.',
+    errConflict: 'Could not switch: there are changes that would be overwritten.',
+    errNotOnDraft: 'You are not in a draft.',
     errGeneric: (m) => `Something went wrong: ${m}`,
     setBase: 'Approved branch',
     setBaseDesc: 'The branch that holds the approved version, usually “main”.',
     setFolders: 'Folders',
-    setFoldersDesc: 'Comma-separated folders (relative to the vault) that are edited and published. Empty means the whole vault.',
+    setFoldersDesc: 'Comma-separated folders (relative to the vault) that are edited and sent for approval. Empty means the whole vault.',
     setPrefix: 'Draft branch prefix',
-    setPrefixDesc: 'Draft branches are named <prefix><note>-<date>.',
+    setPrefixDesc: 'Draft branches are named <prefix><document>-<date>.',
     setLanguage: 'Language',
     setLanguageDesc: 'Reload Obsidian after changing.',
-    setLock: 'Read-only approved version',
-    setLockDesc: 'Open notes in reading view when you are not in a draft.',
     setGit: 'Path to git',
     setGh: 'Path to gh',
     setPathDesc: 'Leave empty to find it automatically.',
   },
   sv: {
-    edit: 'Redigera',
-    continueEdit: 'Fortsätt redigera',
-    publish: 'Publicera',
-    publishChanges: 'Publicera ändringarna',
-    saveAndClose: 'Spara och stäng',
-    save: 'Spara utkast',
+    panelTitle: 'Ändringar',
+    showPanel: 'Visa ändringar',
+    approvedOption: '📖 Godkänd version',
+    draftOption: (name, waiting) => `✏️ ${name}` + (waiting ? ' · väntar på godkännande' : ''),
+    otherOption: (b) => `⎇ ${b}`,
+    noChanges: 'Inga ändringar',
+    noChangesSub: 'Börja skriva i ett dokument så skapas ett utkast automatiskt.',
+    otherSub: 'Du tittar på en annan version än den godkända.',
+    draftHeading: (n) => `Utkast · ${n} ${n === 1 ? 'ändrat dokument' : 'ändrade dokument'}`,
+    draftEmpty: 'Utkast · inga ändringar än',
+    notSent: 'Inte skickat för godkännande än.',
+    waiting: '⏳ Väntar på godkännande',
+    waitingChanged: '⏳ Väntar på godkännande · nya ändringar är inte skickade',
+    send: 'Skicka för godkännande',
+    sendChanges: 'Skicka ändringarna',
     discard: 'Släng utkast',
-    done: 'Klar',
     viewOnGithub: 'Visa på GitHub',
-    showApproved: 'Visa godkänd version',
     retry: 'Försök igen',
     refresh: 'Uppdatera',
     busy: 'Arbetar…',
-    approvedTitle: '📖 Godkänd version',
-    approvedSub: 'Det här är versionen som gäller.',
-    approvedDraftSub: 'Du har ett utkast med ändringar i det här dokumentet.',
-    approvedWaitingSub: 'Din ändring väntar på godkännande.',
-    draftTitle: (n) => '✏️ Utkast' + (n ? ` · ${n} ${n === 1 ? 'ändrat dokument' : 'ändrade dokument'}` : ''),
-    draftSub: 'Ändringarna sparas automatiskt. De gäller först när de har godkänts.',
-    draftEmptySub: 'Gör dina ändringar i dokumentet.',
-    waitingTitle: '⏳ Väntar på godkännande',
-    waitingSub: 'Ändrar du mer kan du publicera igen.',
-    otherTitle: (b) => `⎇ ${b}`,
-    otherSub: 'Du tittar på en annan version än den godkända.',
-    errorTitle: '⚠ Review Flow kan inte arbeta här',
-    locked: 'Det här är den godkända versionen. Tryck på Redigera för att ändra.',
-    nothingToSave: 'Inga ändringar att spara.',
-    saved: 'Sparat.',
-    savedLocal: 'Sparat bara på den här datorn (ingen anslutning). Laddas upp nästa gång.',
-    nothingToPublish: 'Inget att publicera. Gör en ändring först.',
-    publishTitle: 'Publicera för godkännande',
-    publishIntro: 'Ändringarna skickas för granskning. De gäller först när de har godkänts.',
+    deleted: 'borttaget',
+    draftCreated: (n) => `Ett utkast skapades: ${n}. Ändringarna stannar där tills de har godkänts.`,
+    nothingToSend: 'Inget att skicka. Gör en ändring först.',
+    sendTitle: 'Skicka för godkännande',
+    sendIntro: 'Dokumenten skickas för granskning. Ändringarna gäller först när de har godkänts.',
     fieldTitle: 'Vad har du ändrat?',
     fieldBody: 'Mer detaljer (valfritt)',
     cancel: 'Avbryt',
-    published: 'Skickat för godkännande. Ändringen syns här när den har godkänts.',
-    republished: 'Begäran om godkännande är uppdaterad med dina senaste ändringar.',
+    sent: 'Skickat för godkännande. Ändringen gäller när den har godkänts.',
+    resent: 'Ändringarna är skickade.',
     discardConfirm: 'Släng utkastet? Alla ändringar i det raderas och en öppen begäran om godkännande stängs. Det går inte att ångra.',
     discarded: 'Utkastet är slängt.',
     commitMsg: (files) => `Utkast: ${files}`,
@@ -139,19 +125,17 @@ const STRINGS = {
     errNotRepo: 'Det här valvet ligger inte i ett git-repo.',
     errOffline: 'Kunde inte nå GitHub. Kontrollera anslutningen och försök igen.',
     errIdentity: 'Git vet inte vem du är. Kör ”gh auth setup-git” eller ange git user.name och user.email.',
-    errConflict: 'Kunde inte byta: det finns osparade ändringar som skulle skrivas över. Spara eller släng utkastet först.',
-    errNotOnDraft: 'Du är inte i ett utkast. Tryck på Redigera först.',
+    errConflict: 'Kunde inte byta: det finns ändringar som skulle skrivas över.',
+    errNotOnDraft: 'Du är inte i ett utkast.',
     errGeneric: (m) => `Något gick fel: ${m}`,
     setBase: 'Godkänd gren',
     setBaseDesc: 'Grenen som har den godkända versionen, oftast ”main”.',
     setFolders: 'Mappar',
-    setFoldersDesc: 'Kommaseparerade mappar (relativt valvet) som redigeras och publiceras. Tomt betyder hela valvet.',
+    setFoldersDesc: 'Kommaseparerade mappar (relativt valvet) som redigeras och skickas för godkännande. Tomt betyder hela valvet.',
     setPrefix: 'Prefix för utkastgrenar',
-    setPrefixDesc: 'Utkastgrenar får namnet <prefix><anteckning>-<datum>.',
+    setPrefixDesc: 'Utkastgrenar får namnet <prefix><dokument>-<datum>.',
     setLanguage: 'Språk',
     setLanguageDesc: 'Starta om Obsidian efter ändring.',
-    setLock: 'Skrivskyddad godkänd version',
-    setLockDesc: 'Öppna anteckningar i läsläge när du inte är i ett utkast.',
     setGit: 'Sökväg till git',
     setGh: 'Sökväg till gh',
     setPathDesc: 'Lämna tomt för att hitta automatiskt.',
@@ -267,6 +251,11 @@ class GitFlow {
     return !!branch && branch.startsWith(this.s.branchPrefix);
   }
 
+  // A readable name for a draft branch: the document part without prefix and date.
+  draftName(branch) {
+    return branch.slice(this.s.branchPrefix.length).replace(/-\d{6}-\d{4}$/, '');
+  }
+
   async state() {
     const branch = await this.git('branch', '--show-current');
     const changes = parseStatus(await this.git('status', '--porcelain', '-z', '--untracked-files=all', '--', ...this.paths()));
@@ -281,15 +270,6 @@ class GitFlow {
   // Vault-relative paths changed in a draft compared with the approved version.
   async filesInDraft(branch) {
     return lines(await this.git('diff', '--name-only', '--relative', `${this.base}...${branch}`, '--', ...this.paths()));
-  }
-
-  // Maps each changed file to the newest draft that changes it.
-  async draftsByFile() {
-    const map = new Map();
-    for (const d of await this.drafts()) {
-      for (const f of await this.filesInDraft(d)) if (!map.has(f)) map.set(f, d);
-    }
-    return map;
   }
 
   // Details about the current draft: files changed since the approved version, and whether anything is not uploaded.
@@ -330,16 +310,22 @@ class GitFlow {
     return pr && pr.state === 'OPEN' ? pr.url : null;
   }
 
-  // Removes local drafts whose pull request has been merged.
+  // Removes local drafts whose pull request has been merged. Returns true if any was removed.
   async cleanupMerged() {
     const current = await this.git('branch', '--show-current');
+    let removed = false;
     for (const d of await this.drafts()) {
       if (d === current) continue;
       const pr = await this.prInfo(d);
-      if (pr && pr.state === 'MERGED') await this.git('branch', '-D', d);
+      if (pr && pr.state === 'MERGED') {
+        await this.git('branch', '-D', d);
+        removed = true;
+      }
     }
+    return removed;
   }
 
+  // Starts a draft from the approved version. Uncommitted changes come along into the draft.
   async startDraft(label) {
     const st = await this.state();
     if (!st.onBase) await this.git('switch', this.base);
@@ -347,10 +333,6 @@ class GitFlow {
     const name = `${this.s.branchPrefix}${slugify(label)}-${stamp()}`;
     await this.git('switch', '-c', name);
     return name;
-  }
-
-  async openDraft(name) {
-    await this.git('switch', name);
   }
 
   async push(strict) {
@@ -379,13 +361,30 @@ class GitFlow {
     return { saved: true, created, pushed, branch: created || st.branch };
   }
 
+  // Saves the current draft and switches to `target` (a draft or the approved branch). A draft without changes is removed.
+  async switchTo(target) {
+    const st = await this.state();
+    if (st.changes.length) await this.save();
+    const current = await this.git('branch', '--show-current');
+    if (current !== target) await this.git('switch', target);
+    if (this.isDraft(current) && current !== target && (await this.git('rev-list', '--count', `${this.base}..${current}`)) === '0') {
+      await this.git('branch', '-D', current);
+      await this.git('push', 'origin', '--delete', current).catch(() => {});
+    }
+    if (target === this.base) await this.updateBase();
+  }
+
+  backToBase() {
+    return this.switchTo(this.base);
+  }
+
   // Saves, uploads and opens (or updates) a pull request, then returns to the approved version.
   async publish(title, details) {
     await this.save();
     const st = await this.state();
-    if (!st.isDraft) throw new FlowError('nothingToPublish');
+    if (!st.isDraft) throw new FlowError('nothingToSend');
     const files = await this.filesInDraft('HEAD');
-    if (!files.length) throw new FlowError('nothingToPublish');
+    if (!files.length) throw new FlowError('nothingToSend');
     await this.push(true);
     let url = await this.prUrl(st.branch);
     const updated = !!url;
@@ -398,18 +397,6 @@ class GitFlow {
     await this.git('switch', this.base);
     await this.updateBase();
     return { url, updated, branch: st.branch };
-  }
-
-  // Leaves the draft (saving it first) and shows the approved version. A draft without changes is removed.
-  async backToBase() {
-    const st = await this.state();
-    if (st.isDraft && st.changes.length) await this.save();
-    await this.git('switch', this.base);
-    if (st.isDraft && (await this.git('rev-list', '--count', `${this.base}..${st.branch}`)) === '0') {
-      await this.git('branch', '-D', st.branch);
-      await this.git('push', 'origin', '--delete', st.branch).catch(() => {});
-    }
-    await this.updateBase();
   }
 
   // Deletes the current draft locally and on GitHub, closing any open pull request.
@@ -432,7 +419,7 @@ class GitFlow {
 
 // ---------- Obsidian UI ----------
 
-class PublishModal extends Modal {
+class SendModal extends Modal {
   constructor(plugin, defaultTitle, onSubmit) {
     super(plugin.app);
     this.plugin = plugin;
@@ -448,8 +435,8 @@ class PublishModal extends Modal {
       this.close();
       this.onSubmit(this.title.trim(), this.details.trim());
     };
-    this.titleEl.setText(t('publishTitle'));
-    this.contentEl.createEl('p', { text: t('publishIntro') });
+    this.titleEl.setText(t('sendTitle'));
+    this.contentEl.createEl('p', { text: t('sendIntro') });
     new Setting(this.contentEl).setName(t('fieldTitle')).addText((c) => {
       c.setValue(this.title).onChange((v) => (this.title = v));
       c.inputEl.addClass('review-flow-wide');
@@ -463,7 +450,7 @@ class PublishModal extends Modal {
     });
     new Setting(this.contentEl)
       .addButton((b) => b.setButtonText(t('cancel')).onClick(() => this.close()))
-      .addButton((b) => b.setButtonText(t('publish')).setCta().onClick(submit));
+      .addButton((b) => b.setButtonText(t('send')).setCta().onClick(submit));
   }
 
   onClose() {
@@ -497,46 +484,159 @@ class ConfirmModal extends Modal {
   }
 }
 
+// The side panel: draft picker, changed documents and the actions.
+class ChangesView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+  }
+
+  getViewType() {
+    return VIEW_TYPE;
+  }
+
+  getDisplayText() {
+    return this.plugin.t('panelTitle');
+  }
+
+  getIcon() {
+    return 'git-pull-request';
+  }
+
+  async onOpen() {
+    this.render();
+  }
+
+  render() {
+    const p = this.plugin;
+    const t = (k, ...a) => p.t(k, ...a);
+    const s = p.state;
+    const el = this.contentEl;
+    el.empty();
+    el.addClass('review-flow-panel');
+    if (!s) return;
+
+    if (s.error) {
+      el.createDiv({ cls: 'review-flow-error', text: p.describeError(s.error) });
+      this.button(el, t('retry'), () => p.refresh());
+      return;
+    }
+
+    // Draft picker
+    const select = el.createEl('select', { cls: 'dropdown review-flow-select' });
+    const option = (value, text) => select.createEl('option', { value, text });
+    option(p.settings.baseBranch, t('approvedOption'));
+    for (const d of s.drafts) {
+      const pr = p.pr(d);
+      option(d, t('draftOption', p.flow.draftName(d), pr && pr.state === 'OPEN'));
+    }
+    if (!s.onBase && !s.isDraft) option(s.branch, t('otherOption', s.branch || '?'));
+    select.value = s.branch;
+    select.disabled = p.busy;
+    select.onchange = () => p.switchTo(select.value);
+
+    if (!s.onBase && !s.isDraft) {
+      el.createDiv({ cls: 'review-flow-sub', text: t('otherSub') });
+      return;
+    }
+
+    const files = s.files;
+    if (!files.length) {
+      el.createDiv({ cls: 'review-flow-heading', text: s.isDraft ? t('draftEmpty') : t('noChanges') });
+      if (!s.isDraft) el.createDiv({ cls: 'review-flow-sub', text: t('noChangesSub') });
+    } else {
+      el.createDiv({ cls: 'review-flow-heading', text: t('draftHeading', files.length) });
+    }
+
+    // Approval status
+    const pr = s.isDraft ? p.pr(s.branch) : null;
+    const waiting = pr && pr.state === 'OPEN';
+    if (s.isDraft && files.length) {
+      const status = el.createDiv({ cls: 'review-flow-sub' });
+      status.setText(waiting ? t(s.unpushed ? 'waitingChanged' : 'waiting') : t('notSent'));
+      if (waiting) {
+        status.createSpan({ text: ' · ' });
+        status.createEl('a', { text: t('viewOnGithub'), href: pr.url });
+      }
+    }
+
+    // Changed documents
+    if (files.length) {
+      const list = el.createDiv({ cls: 'review-flow-files' });
+      for (const f of files) {
+        const file = p.app.vault.getAbstractFileByPath(f);
+        const item = list.createDiv({ cls: 'review-flow-file tree-item-self is-clickable' });
+        item.createSpan({ text: baseName(f).replace(/\.md$/, '') });
+        if (!file) {
+          item.addClass('is-deleted');
+          item.createSpan({ cls: 'review-flow-file-note', text: ` (${t('deleted')})` });
+        } else {
+          item.onclick = () => p.app.workspace.getLeaf(false).openFile(file);
+        }
+      }
+    }
+
+    // Actions
+    if (files.length && (!waiting || s.unpushed)) this.button(el, t(waiting ? 'sendChanges' : 'send'), () => p.send(), true);
+    if (s.isDraft) {
+      const discard = el.createEl('button', { cls: 'review-flow-link', text: t('discard') });
+      discard.disabled = p.busy;
+      discard.onclick = () => p.discard();
+    }
+    if (p.busy) el.createDiv({ cls: 'review-flow-sub', text: t('busy') });
+  }
+
+  button(el, text, onClick, cta) {
+    const b = el.createEl('button', { cls: 'review-flow-main' + (cta ? ' mod-cta' : ''), text });
+    b.disabled = this.plugin.busy;
+    b.onclick = onClick;
+    return b;
+  }
+}
+
 class ReviewFlowPlugin extends Plugin {
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.busy = false;
+    this.quietUntil = 0;
+    this.lastCleanup = 0;
     this.state = null;
     this.prCache = new Map();
     this.prLoading = new Set();
-    this.lastLockNotice = 0;
     this.flow = new GitFlow(
       makeExec(() => this.vaultPath(), () => this.settings),
       () => this.settings,
       (k, ...a) => this.t(k, ...a)
     );
 
-    this.addCommand({ id: 'edit', name: this.t('edit'), callback: () => this.edit() });
-    this.addCommand({ id: 'publish', name: this.t('publish'), callback: () => this.publish() });
-    this.addCommand({ id: 'save-and-close', name: this.t('saveAndClose'), callback: () => this.backToBase() });
-    this.addCommand({ id: 'save', name: this.t('save'), callback: () => this.save() });
+    this.registerView(VIEW_TYPE, (leaf) => new ChangesView(leaf, this));
+
+    this.addCommand({ id: 'show', name: this.t('showPanel'), callback: () => this.showPanel() });
+    this.addCommand({ id: 'send', name: this.t('send'), callback: () => this.send() });
     this.addCommand({ id: 'discard', name: this.t('discard'), callback: () => this.discard() });
     this.addCommand({ id: 'refresh', name: this.t('refresh'), callback: () => this.refresh() });
 
     this.addSettingTab(new ReviewFlowSettingTab(this.app, this));
 
-    const layout = () => {
-      this.renderBars();
-      this.enforceLock();
-    };
-    this.registerEvent(this.app.workspace.on('layout-change', layout));
-    this.registerEvent(this.app.workspace.on('active-leaf-change', layout));
-    this.registerEvent(this.app.workspace.on('file-open', layout));
-    const soon = () => this.refreshSoon();
-    for (const evt of ['modify', 'create', 'delete', 'rename']) this.registerEvent(this.app.vault.on(evt, soon));
-    this.registerDomEvent(window, 'focus', soon);
+    for (const evt of ['modify', 'create', 'delete', 'rename']) {
+      this.registerEvent(this.app.vault.on(evt, (file) => this.onVaultChange(file)));
+    }
+    this.registerDomEvent(window, 'focus', () => this.refreshSoon());
     this.registerInterval(window.setInterval(() => this.refresh(), 30000));
 
-    this.app.workspace.onLayoutReady(() => this.refresh());
+    this.app.workspace.onLayoutReady(async () => {
+      if (!this.app.workspace.getLeavesOfType(VIEW_TYPE).length) await this.showPanel(false);
+      this.refresh();
+    });
   }
 
-  onunload() {
-    document.querySelectorAll('.review-flow-bar').forEach((el) => el.remove());
+  async showPanel(reveal = true) {
+    let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+    if (!leaf) {
+      leaf = this.app.workspace.getLeftLeaf(true);
+      await leaf.setViewState({ type: VIEW_TYPE, active: true });
+    }
+    if (reveal) this.app.workspace.revealLeaf(leaf);
   }
 
   lang() {
@@ -559,18 +659,24 @@ class ReviewFlowPlugin extends Plugin {
     this.refresh();
   }
 
+  inScope(path) {
+    const folders = this.flow.paths();
+    return folders.includes('.') || folders.some((f) => path === f || path.startsWith(f + '/'));
+  }
+
   // ----- State -----
+
+  async loadState() {
+    const st = await this.flow.state();
+    st.drafts = await this.flow.drafts();
+    if (st.isDraft) Object.assign(st, await this.flow.draftInfo());
+    else st.files = st.changes;
+    return st;
+  }
 
   refreshSoon() {
     window.clearTimeout(this.refreshTimer);
     this.refreshTimer = window.setTimeout(() => this.refresh(), 800);
-  }
-
-  async loadState() {
-    const st = await this.flow.state();
-    if (st.isDraft) Object.assign(st, await this.flow.draftInfo());
-    else st.fileDrafts = await this.flow.draftsByFile();
-    return st;
   }
 
   async refresh() {
@@ -580,8 +686,17 @@ class ReviewFlowPlugin extends Plugin {
     } catch (e) {
       this.state = { error: e };
     }
-    this.renderBars();
-    this.enforceLock();
+    this.render();
+    if (Date.now() - this.lastCleanup > CLEANUP_INTERVAL && this.state && !this.state.error) {
+      this.lastCleanup = Date.now();
+      if (await this.flow.cleanupMerged().catch(() => false)) this.refresh();
+    }
+  }
+
+  render() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      if (leaf.view instanceof ChangesView) leaf.view.render();
+    }
   }
 
   // Pull request info from a short-lived cache; a stale entry is reloaded in the background.
@@ -599,121 +714,31 @@ class ReviewFlowPlugin extends Plugin {
     } finally {
       this.prLoading.delete(branch);
     }
-    this.renderBars();
+    this.render();
   }
 
-  inScope(path) {
-    const folders = this.flow.paths();
-    return folders.includes('.') || folders.some((f) => path === f || path.startsWith(f + '/'));
-  }
-
-  // ----- The bar above each note -----
-
-  renderBars() {
-    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-      const view = leaf.view;
-      if (!(view instanceof MarkdownView)) continue;
-      let bar = view.containerEl.querySelector(':scope > .review-flow-bar');
-      if (!view.file || !this.state || !this.inScope(view.file.path)) {
-        if (bar) bar.remove();
-        continue;
-      }
-      if (!bar) {
-        bar = createDiv({ cls: 'review-flow-bar' });
-        view.containerEl.insertBefore(bar, view.contentEl);
-      }
-      this.renderBar(bar, view);
-    }
-  }
-
-  renderBar(bar, view) {
-    const s = this.state;
-    const t = (k, ...a) => this.t(k, ...a);
-    bar.empty();
-    bar.className = 'review-flow-bar';
-    const text = bar.createDiv({ cls: 'review-flow-text' });
-    const actions = bar.createDiv({ cls: 'review-flow-actions' });
-    const show = (cls, title, sub) => {
-      bar.addClass(cls);
-      text.createDiv({ cls: 'review-flow-title', text: title });
-      if (sub) text.createDiv({ cls: 'review-flow-sub', text: sub });
-    };
-    const link = (label, fn) => {
-      const b = actions.createEl('button', { cls: 'review-flow-link', text: label });
-      b.disabled = this.busy;
-      b.onclick = fn;
-    };
-    const main = (label, fn, disabled) => {
-      const b = actions.createEl('button', { cls: 'mod-cta review-flow-main', text: this.busy ? t('busy') : label });
-      b.disabled = this.busy || !!disabled;
-      b.onclick = fn;
-    };
-    const open = (url) => () => window.open(url);
-
-    if (s.error) {
-      show('is-error', t('errorTitle'), this.describeError(s.error));
-      main(t('retry'), () => this.refresh());
-      return;
-    }
-
-    if (s.isDraft) {
-      const pr = this.pr(s.branch);
-      const waiting = pr && pr.state === 'OPEN';
-      if (waiting && !s.unpushed) {
-        show('is-waiting', t('waitingTitle'), t('waitingSub'));
-        link(t('viewOnGithub'), open(pr.url));
-        link(t('discard'), () => this.discard());
-        main(t('done'), () => this.backToBase());
+  // Typing in the approved version moves the change into a new draft right away.
+  async onVaultChange(file) {
+    if (!file || !this.inScope(file.path)) return;
+    if (this.busy || Date.now() < this.quietUntil) return; // files change on disk when we switch branches
+    const st = this.state;
+    if (st && !st.error && st.onBase) {
+      const now = await this.flow.state().catch(() => null);
+      if (now && now.onBase && now.changes.length && !this.busy) {
+        await this.run(async () => {
+          const name = await this.flow.startDraft(baseName(now.changes[0]).replace(/\.md$/, ''));
+          new Notice(this.t('draftCreated', this.flow.draftName(name)), 8000);
+        });
         return;
       }
-      show('is-draft', t('draftTitle', s.files.length), t(s.files.length ? 'draftSub' : 'draftEmptySub'));
-      if (waiting) link(t('viewOnGithub'), open(pr.url));
-      link(t('saveAndClose'), () => this.backToBase());
-      link(t('discard'), () => this.discard());
-      main(t(waiting ? 'publishChanges' : 'publish'), () => this.publish(), !s.files.length);
-      return;
     }
-
-    if (!s.onBase) {
-      show('is-other', t('otherTitle', s.branch || '?'), t('otherSub'));
-      main(t('showApproved'), () => this.backToBase());
-      return;
-    }
-
-    const draft = s.fileDrafts.get(view.file.path);
-    const pr = draft && this.pr(draft);
-    const waiting = pr && pr.state === 'OPEN';
-    show('is-approved', t('approvedTitle'), t(!draft ? 'approvedSub' : waiting ? 'approvedWaitingSub' : 'approvedDraftSub'));
-    if (waiting) link(t('viewOnGithub'), open(pr.url));
-    main(t(draft ? 'continueEdit' : 'edit'), () => this.edit(view));
-  }
-
-  // Keeps notes in reading view while the approved version is shown.
-  enforceLock() {
-    const s = this.state;
-    if (!this.settings.lockBase || !s || s.error || s.isDraft) return;
-    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-      const view = leaf.view;
-      if (!(view instanceof MarkdownView) || !view.file || !this.inScope(view.file.path)) continue;
-      if (view.getMode() !== 'source') continue;
-      this.setMode(view, 'preview');
-      if (Date.now() - this.lastLockNotice > 5000) {
-        this.lastLockNotice = Date.now();
-        new Notice(this.t('locked'));
-      }
-    }
-  }
-
-  setMode(view, mode) {
-    if (!view || view.getMode() === mode) return;
-    const vs = view.leaf.getViewState();
-    view.leaf.setViewState({ ...vs, state: { ...vs.state, mode } });
+    this.refreshSoon();
   }
 
   // Writes any pending editor changes to disk before git looks at the files.
   async flushEditors() {
     for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-      if (leaf.view instanceof MarkdownView) await leaf.view.save();
+      if (leaf.view instanceof obsidian.MarkdownView) await leaf.view.save();
     }
   }
 
@@ -737,7 +762,7 @@ class ReviewFlowPlugin extends Plugin {
       return;
     }
     this.busy = true;
-    this.renderBars();
+    this.render();
     try {
       await action();
     } catch (e) {
@@ -745,67 +770,40 @@ class ReviewFlowPlugin extends Plugin {
       new Notice(this.describeError(e), 10000);
     } finally {
       this.busy = false;
-      this.lastLockNotice = Date.now(); // the bar already says what happened
+      this.quietUntil = Date.now() + 2000;
       await this.refresh();
     }
   }
 
   // ----- Actions -----
 
-  // Opens the draft that already changes this note, or starts a new one.
-  edit(view) {
-    view = view || this.app.workspace.getActiveViewOfType(MarkdownView);
-    const file = view && view.file;
-    return this.run(async () => {
-      const st = await this.flow.state();
-      if (!st.isDraft) {
-        await this.flow.updateBase();
-        await this.flow.cleanupMerged();
-        const draft = file && (await this.flow.draftsByFile()).get(file.path);
-        if (draft) await this.flow.openDraft(draft);
-        else await this.flow.startDraft(file ? file.basename : 'draft');
-        this.state = await this.loadState();
-      }
-      this.setMode(view, 'source');
-    });
-  }
-
-  save() {
+  switchTo(branch) {
     return this.run(async () => {
       await this.flushEditors();
-      const r = await this.flow.save();
-      if (!r.saved) return new Notice(this.t('nothingToSave'));
-      new Notice(this.t(r.pushed ? 'saved' : 'savedLocal'), r.pushed ? 3000 : 10000);
+      await this.flow.switchTo(branch);
     });
   }
 
-  publish() {
+  send() {
     return this.run(async () => {
       await this.flushEditors();
       const st = await this.flow.state();
       const files = st.isDraft ? (await this.flow.draftInfo()).files : st.changes;
-      if (!files.length) return new Notice(this.t('nothingToPublish'));
-      const doPublish = async (title, details) => {
+      if (!files.length) return new Notice(this.t('nothingToSend'));
+      const doSend = async (title, details) => {
         await this.flushEditors();
         const r = await this.flow.publish(title, details);
         this.prCache.delete(r.branch);
         const frag = createFragment((f) => {
-          f.createSpan({ text: this.t(r.updated ? 'republished' : 'published') + ' ' });
+          f.createSpan({ text: this.t(r.updated ? 'resent' : 'sent') + ' ' });
           f.createEl('a', { text: this.t('viewOnGithub'), href: r.url });
         });
         new Notice(frag, 15000);
       };
-      // Already waiting for approval: just upload the latest changes.
-      if (st.isDraft && (await this.flow.prUrl(st.branch))) return doPublish('', '');
+      // Already waiting for approval: just send the latest changes.
+      if (st.isDraft && (await this.flow.prUrl(st.branch))) return doSend('', '');
       const title = files.map((f) => baseName(f).replace(/\.md$/, '')).slice(0, 3).join(', ');
-      new PublishModal(this, title, (ti, d) => this.run(() => doPublish(ti, d))).open();
-    });
-  }
-
-  backToBase() {
-    return this.run(async () => {
-      await this.flushEditors();
-      await this.flow.backToBase();
+      new SendModal(this, title, (ti, d) => this.run(() => doSend(ti, d))).open();
     });
   }
 
@@ -843,12 +841,6 @@ class ReviewFlowSettingTab extends PluginSettingTab {
     new Setting(el).setName(t('setLanguage')).setDesc(t('setLanguageDesc')).addDropdown((d) =>
       d.addOptions({ auto: 'Auto', en: 'English', sv: 'Svenska' }).setValue(p.settings.language).onChange(async (v) => {
         p.settings.language = v;
-        await p.saveSettings();
-      })
-    );
-    new Setting(el).setName(t('setLock')).setDesc(t('setLockDesc')).addToggle((c) =>
-      c.setValue(p.settings.lockBase).onChange(async (v) => {
-        p.settings.lockBase = v;
         await p.saveSettings();
       })
     );

@@ -1,34 +1,18 @@
-/* The bar above each note: status on the left, one main action on the right. */
-.review-flow-bar {
+/* The side panel: draft picker, changed documents and the actions. */
+.review-flow-panel {
   display: flex;
-  align-items: center;
-  gap: var(--size-4-4);
-  padding: var(--size-4-3) var(--size-4-5);
-  border-bottom: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary);
+  flex-direction: column;
+  gap: var(--size-4-2);
+  padding: var(--size-4-3);
 }
 
-.review-flow-bar.is-draft {
-  background: rgba(var(--color-yellow-rgb), 0.14);
+.review-flow-select {
+  width: 100%;
 }
 
-.review-flow-bar.is-waiting {
-  background: rgba(var(--color-blue-rgb), 0.12);
-}
-
-.review-flow-bar.is-other,
-.review-flow-bar.is-error {
-  background: rgba(var(--color-red-rgb), 0.1);
-}
-
-.review-flow-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.review-flow-title {
+.review-flow-heading {
   font-weight: var(--font-semibold);
-  font-size: var(--font-ui-medium);
+  margin-top: var(--size-4-2);
 }
 
 .review-flow-sub {
@@ -36,31 +20,50 @@
   font-size: var(--font-ui-small);
 }
 
-.review-flow-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--size-4-2);
-  flex-shrink: 0;
+.review-flow-error {
+  color: var(--text-error);
 }
 
-.review-flow-actions button.review-flow-main {
+.review-flow-files {
+  display: flex;
+  flex-direction: column;
+  margin: 0 calc(-1 * var(--size-4-2));
+}
+
+.review-flow-file {
+  padding: var(--size-4-1) var(--size-4-2);
+  border-radius: var(--radius-s);
+}
+
+.review-flow-file.is-deleted {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.review-flow-file-note {
+  font-size: var(--font-ui-smaller);
+}
+
+.review-flow-panel button.review-flow-main {
+  width: 100%;
+  height: auto;
+  padding: var(--size-4-2) var(--size-4-4);
+  margin-top: var(--size-4-2);
   font-size: var(--font-ui-medium);
   font-weight: var(--font-semibold);
-  padding: var(--size-4-2) var(--size-4-6);
-  height: auto;
 }
 
-.review-flow-actions button.review-flow-link {
+.review-flow-panel button.review-flow-link {
+  align-self: center;
   background: none;
   box-shadow: none;
   color: var(--text-muted);
   font-size: var(--font-ui-small);
   text-decoration: underline;
-  padding: var(--size-4-1) var(--size-4-2);
 }
 
-.review-flow-actions button.review-flow-link:hover {
-  color: var(--text-normal);
+.review-flow-panel button.review-flow-link:hover {
+  color: var(--text-error);
 }
 
 .review-flow-wide {
