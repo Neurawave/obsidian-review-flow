@@ -27,6 +27,7 @@ jobs:
           git config --global user.name ci
           git config --global user.email ci@example.com
           npm ci
+          npm run build
           npm test
       # Lets anyone verify that the release files were built from this repository:
       # gh attestation verify main.js --repo granlov/obsidian-review-flow

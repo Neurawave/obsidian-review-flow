@@ -70,7 +70,7 @@ Nothing needs to be added to the documents repository. If pasted images would no
 
 ## Development
 
-No build step: `main.js` is the plugin. The tests run the git flow against a temporary repository with a fake `gh`:
+No build step: `main.js` is the plugin, and `npm run build` only checks its syntax. The tests run the git flow against a temporary repository with a fake `gh`:
 
 ```bash
 npm test
