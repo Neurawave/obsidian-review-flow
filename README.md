@@ -31,7 +31,7 @@ There is no Edit or Save button:
 
 [Install Review Flow](https://community.obsidian.md/plugins/review-flow) from Obsidian's community directory, or in Obsidian: **Settings → Community plugins → Browse**, search for **Review Flow**.
 
-Until it has been accepted there, use BRAT: install **BRAT** from the community directory, run **BRAT: Add a beta plugin for testing** and paste `granlov/obsidian-review-flow`. Or copy `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/granlov/obsidian-review-flow/releases) into `<vault>/.obsidian/plugins/review-flow/`.
+To try a newer version before it reaches the directory, use BRAT with `granlov/obsidian-review-flow`. Or copy `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/granlov/obsidian-review-flow/releases) into `<vault>/.obsidian/plugins/review-flow/`.
 
 The first time, the **Changes** panel guides you through the rest, one step at a time:
 

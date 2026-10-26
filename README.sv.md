@@ -31,7 +31,7 @@ Det finns ingen Redigera- eller Spara-knapp:
 
 [Installera Review Flow](https://community.obsidian.md/plugins/review-flow) från Obsidians katalog, eller i Obsidian: **Inställningar → Community-tillägg → Bläddra**, sök efter **Review Flow**.
 
-Tills det har godkänts där använder du BRAT: installera **BRAT** från katalogen, kör **BRAT: Add a beta plugin for testing** och klistra in `granlov/obsidian-review-flow`. Eller kopiera `main.js`, `manifest.json` och `styles.css` från [senaste releasen](https://github.com/granlov/obsidian-review-flow/releases) till `<valv>/.obsidian/plugins/review-flow/`.
+Vill du prova en nyare version innan den når katalogen använder du BRAT med `granlov/obsidian-review-flow`. Eller kopiera `main.js`, `manifest.json` och `styles.css` från [senaste releasen](https://github.com/granlov/obsidian-review-flow/releases) till `<valv>/.obsidian/plugins/review-flow/`.
 
 Första gången guidar panelen **Ändringar** dig resten av vägen, ett steg i taget:
 
