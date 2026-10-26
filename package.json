@@ -2,9 +2,10 @@
   "name": "obsidian-review-flow",
   "version": "0.1.0",
   "private": true,
-  "description": "Edit, save and publish notes for approval through GitHub pull requests.",
+  "description": "Edit documents in Obsidian and send them for approval through GitHub pull requests.",
   "license": "MIT",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/",
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
   }
 }

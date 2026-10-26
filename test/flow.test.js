@@ -324,3 +324,27 @@ test('after sign-in, git gets a name and the GitHub noreply email when none is s
     else process.env.GIT_CONFIG_GLOBAL = savedGlobal;
   }
 });
+
+test('a new vault gets the documents from the repository and keeps its own files', async () => {
+  const fresh = path.join(tmp, 'fresh-vault');
+  fs.mkdirSync(path.join(fresh, '.obsidian'), { recursive: true });
+  fs.writeFileSync(path.join(fresh, '.obsidian', 'app.json'), '{}\n');
+  fs.writeFileSync(path.join(fresh, 'Min anteckning.md'), 'egen\n');
+  const s = { ...settings, folders: 'qms', baseBranch: 'unknown' };
+  const f = new GitFlow(makeExec(() => fresh, () => s), () => s, t, () => fresh);
+  assert.strictEqual(await f.setupStep(), 'repo');
+
+  await assert.rejects(f.connect(path.join(tmp, 'missing.git')));
+  assert.ok(!fs.existsSync(path.join(fresh, '.git')), 'a failed attempt leaves the vault as it was');
+
+  assert.strictEqual(await f.connect(remote), 'main');
+  s.baseBranch = 'main';
+  assert.strictEqual(await f.setupStep(), null);
+  assert.ok(fs.existsSync(path.join(fresh, 'qms', 'SOP-001.md')));
+  assert.strictEqual(fs.readFileSync(path.join(fresh, 'Min anteckning.md'), 'utf8'), 'egen\n');
+  assert.ok(fs.existsSync(path.join(fresh, '.obsidian', 'app.json')));
+  const st = await f.state();
+  assert.strictEqual(st.onBase, true);
+  assert.deepStrictEqual(st.changes, []);
+  await assert.rejects(f.connect(remote), /errAlreadyRepo/);
+});

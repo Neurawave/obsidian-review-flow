@@ -27,26 +27,19 @@ Det finns ingen Redigera- eller Spara-knapp:
 - Obsidian sparar medan du skriver. Byte av utkast eller Skicka laddar upp allt.
 - När en begäran har godkänts och slagits ihop försvinner utkastet ur väljaren.
 
-## Krav
-
-- Obsidian på dator (macOS, Windows eller Linux).
-- [git](https://git-scm.com).
-- [GitHub CLI](https://cli.github.com) (`gh`).
-- Valvet är ett git-repo klonat från GitHub (eller en mapp i ett).
-
 ## Installation
 
-Tills Review Flow finns i Obsidians katalog för community-tillägg installerar du det med tillägget BRAT:
+[Installera Review Flow](https://community.obsidian.md/plugins/review-flow) från Obsidians katalog, eller i Obsidian: **Inställningar → Community-tillägg → Bläddra**, sök efter **Review Flow**.
 
-1. I Obsidian: **Inställningar → Community-tillägg**, slå på dem, välj **Bläddra**, sök efter **BRAT**, välj **Installera** och **Aktivera**.
-2. Öppna kommandopaletten (Cmd/Ctrl+P), välj **BRAT: Add a beta plugin for testing**, klistra in `Neurawave/obsidian-review-flow` och klicka på **Add plugin**.
-3. Under **Inställningar → Review Flow**, sätt **Mappar** till mapparna som redigeras, till exempel `qms`.
+Tills det har godkänts där använder du BRAT: installera **BRAT** från katalogen, kör **BRAT: Add a beta plugin for testing** och klistra in `Neurawave/obsidian-review-flow`. Eller kopiera `main.js`, `manifest.json` och `styles.css` från [senaste releasen](https://github.com/Neurawave/obsidian-review-flow/releases) till `<valv>/.obsidian/plugins/review-flow/`.
 
-Eller kopiera `main.js`, `manifest.json` och `styles.css` från [senaste releasen](https://github.com/Neurawave/obsidian-review-flow/releases) till `<valv>/.obsidian/plugins/review-flow/` och slå på tillägget.
+Första gången guidar panelen **Ändringar** dig resten av vägen, ett steg i taget:
 
-Inget behöver läggas till i dokumentrepot. Var och en installerar tillägget i sin egen Obsidian.
+1. Installera git och GitHub CLI, om de saknas.
+2. Logga in på GitHub med en engångskod.
+3. Hämta dokumenten: skriv repot (till exempel `organisation/dokument`) och, om du vill, mappen som redigeras (till exempel `qms`). De hämtas till valvet.
 
-Om inklistrade bilder inte skulle följa med i granskningen (de sparas utanför mapparna, eller länkas som `[[wikilänkar]]` som GitHub inte visar) säger panelen det och erbjuder en knapp som rättar inställningen.
+Inget behöver läggas till i dokumentrepot. Om inklistrade bilder inte skulle följa med i granskningen säger panelen det och erbjuder en knapp som rättar inställningen.
 
 **Det är GitHub som kräver godkännande, inte tillägget.** Skydda den godkända grenen: kräv pull request och minst ett godkännande.
 
@@ -79,6 +72,16 @@ npm test
 ```
 
 Testerna kräver Node.js 18 eller senare.
+
+## Release
+
+Som för andra Obsidian-tillägg är en release en GitHub-release vars tagg är versionen i `manifest.json`, med `main.js`, `manifest.json` och `styles.css` bifogade.
+
+```bash
+npm version patch
+```
+
+Det uppdaterar `manifest.json`, `versions.json` och `package.json` och skapar en commit och en tagg. Pusha båda med `git push --follow-tags`. Release-workflowen kör testerna och skapar ett utkast till release; publicera det på GitHub. Vid första releasen öppnar du också en pull request till [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases) för att lägga till tillägget i katalogen.
 
 ## Licens
 

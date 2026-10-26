@@ -38,6 +38,10 @@
   margin-top: var(--size-4-2);
 }
 
+.review-flow-panel input.review-flow-input {
+  width: 100%;
+}
+
 .review-flow-code {
   font-family: var(--font-monospace);
   font-size: 1.6em;

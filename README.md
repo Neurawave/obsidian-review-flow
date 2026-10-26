@@ -27,26 +27,19 @@ There is no Edit or Save button:
 - Obsidian saves as you type. Switching drafts or sending uploads everything.
 - When a request has been approved and merged, its draft disappears from the picker.
 
-## Requirements
-
-- Obsidian on desktop (macOS, Windows or Linux).
-- [git](https://git-scm.com).
-- The [GitHub CLI](https://cli.github.com) (`gh`).
-- The vault is a git repository cloned from GitHub (or a folder inside one).
-
 ## Installation
 
-Until Review Flow is in Obsidian's community directory, install it with the BRAT plugin:
+[Install Review Flow](https://community.obsidian.md/plugins/review-flow) from Obsidian's community directory, or in Obsidian: **Settings → Community plugins → Browse**, search for **Review Flow**.
 
-1. In Obsidian: **Settings → Community plugins**, turn them on, choose **Browse**, find **BRAT**, then **Install** and **Enable**.
-2. Open the command palette (Cmd/Ctrl+P), choose **BRAT: Add a beta plugin for testing**, paste `Neurawave/obsidian-review-flow` and click **Add plugin**.
-3. In **Settings → Review Flow**, set **Folders** to the folders people edit, for example `qms`.
+Until it has been accepted there, use BRAT: install **BRAT** from the community directory, run **BRAT: Add a beta plugin for testing** and paste `Neurawave/obsidian-review-flow`. Or copy `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/Neurawave/obsidian-review-flow/releases) into `<vault>/.obsidian/plugins/review-flow/`.
 
-Or copy `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/Neurawave/obsidian-review-flow/releases) into `<vault>/.obsidian/plugins/review-flow/` and turn the plugin on.
+The first time, the **Changes** panel guides you through the rest, one step at a time:
 
-Nothing needs to be added to the documents repository. Each person installs the plugin in their own Obsidian.
+1. Install git and the GitHub CLI, if they are missing.
+2. Sign in to GitHub with a one-time code.
+3. Get the documents: type the repository (for example `organisation/documents`) and, if you like, the folder to edit (for example `qms`). They are downloaded into the vault.
 
-If pasted images would not be included in the review (they are saved outside the folders, or linked as `[[wikilinks]]` that GitHub does not show), the panel says so and offers a button that fixes the setting.
+Nothing needs to be added to the documents repository. If pasted images would not be included in the review, the panel says so and offers a button that fixes the setting.
 
 **Approval is enforced by GitHub, not by the plugin.** Protect the approved branch: require a pull request and at least one approving review.
 
@@ -79,6 +72,16 @@ npm test
 ```
 
 Node.js 18 or later is needed for the tests.
+
+## Releasing
+
+Like other Obsidian plugins, a release is a GitHub release whose tag equals the version in `manifest.json`, with `main.js`, `manifest.json` and `styles.css` attached.
+
+```bash
+npm version patch
+```
+
+This updates `manifest.json`, `versions.json` and `package.json`, and creates a commit and a tag. Push both with `git push --follow-tags`. The release workflow runs the tests and creates a draft release; publish it on GitHub. For the first release, also open a pull request to [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases) to add the plugin to the community directory.
 
 ## License
 

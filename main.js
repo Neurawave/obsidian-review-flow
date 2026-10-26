@@ -9,6 +9,7 @@ const obsidian = require('obsidian');
 const { Plugin, ItemView, Notice, Modal, Setting, PluginSettingTab, FileSystemAdapter } = obsidian;
 const { execFile, spawn } = require('child_process');
 const nodePath = require('path');
+const fs = require('fs');
 
 const VIEW_TYPE = 'review-flow';
 const PR_MAX_AGE = 60000;
@@ -61,6 +62,13 @@ const STRINGS = {
     setupWaiting: 'Waiting for you to approve in the browser…',
     setupFailed: 'Sign-in did not finish. Try again.',
     setupDone: 'You are signed in to GitHub.',
+    setupRepoTitle: 'Get the documents',
+    setupRepoText: 'Which GitHub repository are the documents in? The documents are downloaded into this vault.',
+    setupRepoField: 'Repository, for example organisation/documents',
+    setupFolderField: 'Folder to edit, for example qms (optional)',
+    setupRepoButton: 'Get the documents',
+    setupRepoDone: 'The documents are here. Start writing in any of them.',
+    errAlreadyRepo: 'This vault is already a git repository.',
     hintImages: 'With the current Obsidian settings, images you paste are not included in the review.',
     hintImagesManual: 'Choose Settings → Files and links → Default location for new attachments → In subfolder under current folder, and turn off Use [[Wikilinks]].',
     fixImages: 'Fix the setting',
@@ -135,6 +143,13 @@ const STRINGS = {
     setupWaiting: 'Väntar på att du godkänner i webbläsaren…',
     setupFailed: 'Inloggningen blev inte klar. Försök igen.',
     setupDone: 'Du är inloggad på GitHub.',
+    setupRepoTitle: 'Hämta dokumenten',
+    setupRepoText: 'Vilket GitHub-repo ligger dokumenten i? Dokumenten hämtas till det här valvet.',
+    setupRepoField: 'Repo, till exempel organisation/dokument',
+    setupFolderField: 'Mapp som redigeras, till exempel qms (valfritt)',
+    setupRepoButton: 'Hämta dokumenten',
+    setupRepoDone: 'Dokumenten är här. Börja skriva i vilket som helst av dem.',
+    errAlreadyRepo: 'Det här valvet är redan ett git-repo.',
     hintImages: 'Med Obsidians nuvarande inställningar följer bilder du klistrar in inte med till granskningen.',
     hintImagesManual: 'Välj Inställningar → Filer och länkar → Standardplats för nya bilagor → I undermapp under aktuell mapp, och slå av Använd [[wikilänkar]].',
     fixImages: 'Rätta inställningen',
@@ -277,10 +292,11 @@ function makeExec(getCwd, getSettings) {
 // ---------- Git flow (no Obsidian dependencies, tested on its own) ----------
 
 class GitFlow {
-  constructor(exec, getSettings, t) {
+  constructor(exec, getSettings, t, getCwd) {
     this.exec = exec;
     this.getSettings = getSettings;
     this.t = t;
+    this.getCwd = getCwd;
     this.excluded = ['.obsidian', '.trash'];
   }
 
@@ -320,12 +336,13 @@ class GitFlow {
     return branch.slice(this.s.branchPrefix.length).replace(/-\d{6}-\d{4}(\d{2})?$/, '');
   }
 
-  // The first missing piece of the setup: 'git', 'gh' or 'login'; null when everything is in place.
+  // The first missing piece of the setup: 'git', 'gh', 'login' or 'repo'; null when everything is in place.
   async setupStep() {
     for (const [step, check] of [
       ['git', () => this.git('--version')],
       ['gh', () => this.gh('--version')],
       ['login', () => this.gh('auth', 'status', '--hostname', 'github.com')],
+      ['repo', () => this.git('rev-parse', '--is-inside-work-tree')],
     ]) {
       try {
         await check();
@@ -334,6 +351,28 @@ class GitFlow {
       }
     }
     return null;
+  }
+
+  // Turns the vault into a clone of a GitHub repository ("owner/name" or a URL) and returns its default branch.
+  // Files already in the vault stay. If anything fails, the vault is left as it was.
+  async connect(repo) {
+    const input = repo.trim().replace(/\/+$/, '');
+    const url = /^[\w.-]+\/[\w.-]+$/.test(input) ? `https://github.com/${input.replace(/\.git$/, '')}.git` : input;
+    if (/^https:\/\/github\.com\//.test(url)) await this.gh('auth', 'setup-git', '--hostname', 'github.com');
+    const gitDir = nodePath.join(this.getCwd(), '.git');
+    if (fs.existsSync(gitDir)) throw new FlowError('errAlreadyRepo');
+    try {
+      await this.git('init', '-q');
+      await this.git('remote', 'add', 'origin', url);
+      await this.git('fetch', '-q', 'origin');
+      await this.git('remote', 'set-head', 'origin', '--auto');
+      const branch = (await this.git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD')).replace(/^origin\//, '');
+      await this.git('checkout', '-q', '-B', branch, '--track', `origin/${branch}`);
+      return branch;
+    } catch (e) {
+      fs.rmSync(gitDir, { recursive: true, force: true });
+      throw e;
+    }
   }
 
   // Lets git use the GitHub login for https remotes, and gives git a name and a private email
@@ -605,6 +644,10 @@ class ChangesView extends ItemView {
     const t = (k, ...a) => p.t(k, ...a);
     const s = p.state;
     const el = this.contentEl;
+    // Keep the repository form as it is while the user types in it.
+    const key = s && s.setup ? `${s.setup}|${p.busy}|${!!p.login}|${p.login && p.login.code}` : null;
+    if (key && key === this.lastKey) return;
+    this.lastKey = key;
     el.empty();
     el.addClass('review-flow-panel');
     if (!s) return;
@@ -720,6 +763,20 @@ class ChangesView extends ItemView {
         this.button(el, t('setupOpenGithub'), () => p.openLoginPage(), true);
         el.createDiv({ cls: 'review-flow-sub', text: t('setupWaiting') });
       }
+    } else if (step === 'repo') {
+      const form = p.connectForm;
+      el.createDiv({ cls: 'review-flow-heading', text: t('setupRepoTitle') });
+      el.createDiv({ cls: 'review-flow-sub', text: t('setupRepoText') });
+      const field = (key, placeholder) => {
+        const input = el.createEl('input', { type: 'text', cls: 'review-flow-input', attr: { placeholder } });
+        input.value = form[key];
+        input.disabled = p.busy;
+        input.oninput = () => (form[key] = input.value);
+        return input;
+      };
+      field('repo', t('setupRepoField'));
+      field('folder', t('setupFolderField'));
+      this.button(el, p.busy ? t('busy') : t('setupRepoButton'), () => p.connect(), true);
     }
   }
 
@@ -743,8 +800,10 @@ class ReviewFlowPlugin extends Plugin {
     this.flow = new GitFlow(
       makeExec(() => this.vaultPath(), () => this.settings),
       () => this.settings,
-      (k, ...a) => this.t(k, ...a)
+      (k, ...a) => this.t(k, ...a),
+      () => this.vaultPath()
     );
+    this.connectForm = { repo: '', folder: this.settings.folders };
     this.flow.excluded = [this.app.vault.configDir, '.trash'];
 
     this.registerView(VIEW_TYPE, (leaf) => new ChangesView(leaf, this));
@@ -926,6 +985,20 @@ class ReviewFlowPlugin extends Plugin {
       this.refresh(true);
     });
     this.render();
+  }
+
+  // Downloads the documents from the repository given in the panel into this vault.
+  connect() {
+    const { repo, folder } = this.connectForm;
+    if (!repo.trim()) return;
+    return this.run(async () => {
+      const branch = await this.flow.connect(repo);
+      this.settings.baseBranch = branch;
+      this.settings.folders = folder.trim();
+      await this.saveData(this.settings);
+      this.setupChecked = false;
+      new Notice(this.t('setupRepoDone'), 8000);
+    });
   }
 
   openLoginPage() {
