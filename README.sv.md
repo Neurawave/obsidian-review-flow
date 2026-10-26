@@ -59,9 +59,14 @@ Inget behöver läggas till i dokumentrepot. Om inklistrade bilder inte skulle f
 - Om två personer ändrar samma rader syns konflikten i pull requesten och löses där.
 - Bara på dator; tillägget kör git och gh lokalt.
 
-## Integritet
+## Vad Review Flow kräver och gör utanför valvet
 
-Review Flow har ingen telemetri och gör inga egna nätverksanrop. Det kör `git` och `gh`, som bara pratar med repots fjärrrepo på GitHub. Grennamn byggs av dokumentets namn och tiden, inte av ditt användarnamn. Första gången, om git saknar namn eller e-post för repot, sätter Review Flow ditt GitHub-namn och GitHubs privata noreply-adress för just det repot, så att din riktiga e-postadress inte hamnar i historiken.
+- **Ett GitHub-konto** med tillgång till repot där dokumenten ligger.
+- **Program på datorn:** Review Flow kör `git` och GitHub CLI `gh`. Tillägget gör inga egna nätverksanrop; `git` och `gh` pratar bara med GitHub.
+- **Inloggning:** inloggningen till GitHub sparas av `gh` i dess egen konfiguration, inte av Review Flow.
+- **Git-konfiguration utanför valvet:** för repon som klonats över https kör Review Flow `gh auth setup-git`, som lägger till `gh` som inloggningshjälp för github.com i din globala git-konfiguration (`~/.gitconfig`).
+- **Git-konfiguration i valvet:** om git saknar namn eller e-post för repot sätter Review Flow ditt GitHub-namn och GitHubs privata noreply-adress i repots egen konfiguration (`.git/config`), så att din riktiga e-postadress inte hamnar i historiken.
+- **Ingen telemetri, ingen reklam, inga betalningar.** Källkoden är öppen (MIT).
 
 ## Utveckling
 
@@ -81,7 +86,7 @@ Som för andra Obsidian-tillägg är en release en GitHub-release vars tagg är 
 npm version patch
 ```
 
-Det uppdaterar `manifest.json`, `versions.json` och `package.json` och skapar en commit och en tagg. Pusha båda med `git push --follow-tags`. Release-workflowen kör testerna och skapar ett utkast till release; publicera det på GitHub. Vid första releasen öppnar du också en pull request till [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases) för att lägga till tillägget i katalogen.
+Det uppdaterar `manifest.json`, `versions.json` och `package.json` och skapar en commit och en tagg. Pusha båda med `git push --follow-tags`. Release-workflowen kör testerna och skapar ett utkast till release; publicera det på GitHub. Tillägget kommer in i katalogen genom att man skickar in det en gång på [community.obsidian.md](https://community.obsidian.md), inloggad med ett Obsidian-konto kopplat till GitHub. Senare releaser hämtas automatiskt.
 
 ## Licens
 

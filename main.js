@@ -312,6 +312,15 @@ class GitFlow {
     return this.exec('git', args);
   }
 
+  // Like git(), but returns `fallback` when the command fails.
+  async gitOr(fallback, ...args) {
+    try {
+      return await this.git(...args);
+    } catch (e) {
+      return fallback;
+    }
+  }
+
   gh(...args) {
     return this.exec('gh', args);
   }
@@ -378,10 +387,10 @@ class GitFlow {
   // Lets git use the GitHub login for https remotes, and gives git a name and a private email
   // (GitHub's noreply address) when none is set.
   async finishSetup() {
-    const url = await this.git('remote', 'get-url', 'origin').catch(() => '');
+    const url = await this.gitOr('', 'remote', 'get-url', 'origin');
     if (/^https:/.test(url)) await this.gh('auth', 'setup-git', '--hostname', 'github.com');
-    const has = (key) => this.git('config', key).then((v) => !!v, () => false);
-    const [name, email] = [await has('user.name'), await has('user.email')];
+    const name = !!(await this.gitOr('', 'config', 'user.name'));
+    const email = !!(await this.gitOr('', 'config', 'user.email'));
     if (name && email) return;
     const user = JSON.parse(await this.gh('api', 'user'));
     if (!name) await this.git('config', 'user.name', user.name || user.login);
@@ -501,7 +510,7 @@ class GitFlow {
     if (current !== target) await this.git('switch', target);
     if (this.isDraft(current) && current !== target && (await this.git('rev-list', '--count', `${this.base}..${current}`)) === '0') {
       await this.git('branch', '-D', current);
-      await this.git('push', 'origin', '--delete', current).catch(() => {});
+      await this.gitOr(null, 'push', 'origin', '--delete', current);
     }
     if (target === this.base) await this.updateBase();
   }
@@ -898,7 +907,11 @@ class ReviewFlowPlugin extends Plugin {
       const step = await this.flow.setupStep();
       if (step) return { setup: step };
       this.setupChecked = true;
-      await this.flow.finishSetup().catch((e) => console.error('Review Flow setup', e));
+      try {
+        await this.flow.finishSetup();
+      } catch (e) {
+        console.error('Review Flow setup', e);
+      }
     }
     const st = await this.flow.state();
     st.drafts = await this.flow.drafts();
@@ -923,7 +936,13 @@ class ReviewFlowPlugin extends Plugin {
     if (this.state.onBase && this.state.changes.length && Date.now() >= this.quietUntil) return this.moveToDraft(this.state.changes);
     if (Date.now() - this.lastCleanup > CLEANUP_INTERVAL && this.state && !this.state.error && !this.state.setup) {
       this.lastCleanup = Date.now();
-      if (await this.flow.cleanupMerged().catch(() => false)) this.refresh();
+      let removed = false;
+      try {
+        removed = await this.flow.cleanupMerged();
+      } catch (e) {
+        // Offline: try again later.
+      }
+      if (removed) this.refresh();
     }
   }
 
@@ -965,7 +984,7 @@ class ReviewFlowPlugin extends Plugin {
       if (found.url) login.url = found.url;
       if (found.code && !login.code) {
         login.code = found.code;
-        navigator.clipboard.writeText(login.code).catch(() => {});
+        this.copy(login.code);
         this.openLoginPage();
         this.render();
       }
@@ -999,6 +1018,14 @@ class ReviewFlowPlugin extends Plugin {
       this.setupChecked = false;
       new Notice(this.t('setupRepoDone'), 8000);
     });
+  }
+
+  async copy(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      // gh has usually copied the code already.
+    }
   }
 
   openLoginPage() {

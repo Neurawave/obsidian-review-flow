@@ -59,9 +59,14 @@ Nothing needs to be added to the documents repository. If pasted images would no
 - If two people change the same lines, the conflict shows in the pull request and is resolved there.
 - Desktop only; it runs git and gh on your computer.
 
-## Privacy
+## What Review Flow needs and does outside the vault
 
-Review Flow has no telemetry and makes no network calls of its own. It runs `git` and `gh`, which talk only to your repository's remote on GitHub. Branch names come from the note name and the time, not from your user name. The first time, if git has no name or email set for the repository, Review Flow sets your GitHub name and GitHub's private noreply email for that repository only, so your real email address does not end up in the history.
+- **A GitHub account**, with access to the repository the documents are in.
+- **Programs on your computer:** Review Flow runs `git` and the GitHub CLI `gh`. It makes no network requests of its own; `git` and `gh` talk to GitHub only.
+- **Sign-in:** the GitHub sign-in is stored by `gh` in its own configuration, not by Review Flow.
+- **Git configuration outside the vault:** for repositories cloned over https, Review Flow runs `gh auth setup-git`, which adds `gh` as the credential helper for github.com in your global git configuration (`~/.gitconfig`).
+- **Git configuration in the vault:** if git has no name or email for the repository, Review Flow sets your GitHub name and GitHub's private noreply email in the repository's own configuration (`.git/config`), so your real email address does not end up in the history.
+- **No telemetry, no ads, no payments.** The source is open (MIT).
 
 ## Development
 
@@ -81,7 +86,7 @@ Like other Obsidian plugins, a release is a GitHub release whose tag equals the 
 npm version patch
 ```
 
-This updates `manifest.json`, `versions.json` and `package.json`, and creates a commit and a tag. Push both with `git push --follow-tags`. The release workflow runs the tests and creates a draft release; publish it on GitHub. For the first release, also open a pull request to [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases) to add the plugin to the community directory.
+This updates `manifest.json`, `versions.json` and `package.json`, and creates a commit and a tag. Push both with `git push --follow-tags`. The release workflow runs the tests and creates a draft release; publish it on GitHub. The plugin is listed in the community directory by submitting it once at [community.obsidian.md](https://community.obsidian.md), signed in with an Obsidian account linked to GitHub. Later releases are picked up automatically.
 
 ## License
 
