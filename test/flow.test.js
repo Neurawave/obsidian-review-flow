@@ -77,7 +77,6 @@ let draft;
 test('Edit creates a draft branch', async () => {
   draft = await flow.startDraft('SOP-001');
   assert.match(draft, /^draft\/sop-001-\d{6}-\d{4}$/);
-  assert.strictEqual(flow.displayName(draft), 'sop-001');
   assert.strictEqual((await flow.state()).isDraft, true);
 });
 
@@ -87,6 +86,12 @@ test('only files in the configured folders count as changes', async () => {
   write('scripts/check.py', 'print("changed")\n');
   const st = await flow.state();
   assert.deepStrictEqual(st.changes.sort(), ['qms/Rutin för ändring.md', 'qms/SOP-001.md']);
+});
+
+test('draft info counts changed documents and what is not uploaded', async () => {
+  const info = await flow.draftInfo();
+  assert.deepStrictEqual(info.files.sort(), ['qms/Rutin för ändring.md', 'qms/SOP-001.md']);
+  assert.strictEqual(info.unpushed, true);
 });
 
 test('Save commits and uploads only the folders', async () => {
@@ -99,6 +104,7 @@ test('Save commits and uploads only the folders', async () => {
   assert.match(sh(vault, 'status', '--porcelain'), /scripts\/check\.py/);
   sh(vault, 'checkout', '--', 'scripts/check.py');
   assert.strictEqual((await flow.save()).saved, false);
+  assert.strictEqual((await flow.draftInfo()).unpushed, false);
 });
 
 test('Publish opens a pull request and returns to the approved version', async () => {
@@ -114,6 +120,13 @@ test('Publish opens a pull request and returns to the approved version', async (
   const st = await flow.state();
   assert.strictEqual(st.onBase, true);
   assert.ok(!read('qms/SOP-001.md').includes('| 3 | 4 |'), 'approved version is unchanged until merged');
+});
+
+test('the approved version knows which draft changes each document', async () => {
+  const map = await flow.draftsByFile();
+  assert.strictEqual(map.get('qms/SOP-001.md'), draft);
+  assert.strictEqual(map.get('qms/Rutin för ändring.md'), draft);
+  assert.deepStrictEqual(await flow.prInfo(draft), { url: 'https://github.com/example/repo/pull/1', state: 'OPEN' });
 });
 
 test('Publishing again updates the same pull request', async () => {
@@ -139,6 +152,26 @@ test('after approval the change reaches the approved version and the draft is cl
   await flow.cleanupMerged();
   assert.deepStrictEqual(await flow.drafts(), []);
   assert.ok(read('qms/SOP-001.md').includes('| 5 | 6 |'));
+});
+
+test('Save and close on an empty draft removes it', async () => {
+  const name = await flow.startDraft('tom');
+  await flow.backToBase();
+  assert.strictEqual((await flow.state()).onBase, true);
+  assert.deepStrictEqual(await flow.drafts(), []);
+  assert.strictEqual(sh(vault, 'branch', '--list', name), '');
+});
+
+test('Save and close keeps a draft with changes', async () => {
+  const name = await flow.startDraft('SOP-001');
+  write('qms/SOP-001.md', read('qms/SOP-001.md') + 'Pågående.\n');
+  await flow.backToBase();
+  assert.strictEqual((await flow.state()).onBase, true);
+  assert.strictEqual((await flow.draftsByFile()).get('qms/SOP-001.md'), name);
+  assert.ok(!read('qms/SOP-001.md').includes('Pågående.'));
+  await flow.openDraft(name);
+  assert.ok(read('qms/SOP-001.md').includes('Pågående.'));
+  await flow.discard();
 });
 
 test('Save on the approved version moves the change into a new draft', async () => {

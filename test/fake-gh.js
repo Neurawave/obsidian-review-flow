@@ -16,9 +16,7 @@ if (args[0] === 'pr' && args[1] === 'view') {
     process.stderr.write(`no pull requests found for branch "${args[2]}"\n`);
     process.exit(1);
   }
-  const jq = opt('--jq');
-  if (jq.includes('select')) process.stdout.write(pr.state === 'OPEN' ? pr.url + '\n' : '');
-  else process.stdout.write(pr.state + '\n');
+  process.stdout.write(JSON.stringify({ url: pr.url, state: pr.state }) + '\n');
 } else if (args[0] === 'pr' && args[1] === 'create') {
   const pr = { number: db.prs.length + 1, head: opt('--head'), base: opt('--base'), title: opt('--title'), body: opt('--body'), state: 'OPEN' };
   pr.url = `https://github.com/example/repo/pull/${pr.number}`;

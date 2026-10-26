@@ -1,11 +1,11 @@
 'use strict';
 
-// Review Flow – edit Markdown in Obsidian with a simple review flow on top of git:
-// Edit (draft branch) → Save (commit + push) → Publish (pull request for approval).
+// Review Flow – edit Markdown in Obsidian with a simple review flow on top of git.
+// Each note in scope gets a bar with one main action: Edit → Publish (pull request for approval).
 // Plain JavaScript, no build step. Desktop only (uses git and the GitHub CLI `gh`).
 
 const obsidian = require('obsidian');
-const { Plugin, Notice, Modal, SuggestModal, Setting, PluginSettingTab, Menu, MarkdownView, FileSystemAdapter } = obsidian;
+const { Plugin, Notice, Modal, Setting, PluginSettingTab, MarkdownView, FileSystemAdapter } = obsidian;
 const { execFile } = require('child_process');
 const nodePath = require('path');
 
@@ -19,33 +19,42 @@ const DEFAULT_SETTINGS = {
   ghPath: '',
 };
 
+const PR_MAX_AGE = 60000;
+
 // ---------- Strings ----------
 
 const STRINGS = {
   en: {
     edit: 'Edit',
-    save: 'Save',
+    continueEdit: 'Continue editing',
     publish: 'Publish',
+    publishChanges: 'Publish changes',
+    saveAndClose: 'Save and close',
+    save: 'Save draft',
     discard: 'Discard draft',
-    backToBase: 'Back to approved version',
-    refresh: 'Refresh status',
-    openPr: 'Open approval request on GitHub',
-    statusBase: '📖 Approved version',
-    statusDraft: (name, n) => `✏️ Draft: ${name}` + (n ? ` · ${n} unsaved` : ' · saved'),
-    statusOther: (b) => `⎇ ${b}`,
-    statusError: '⚠ Review Flow',
+    done: 'Done',
+    viewOnGithub: 'View on GitHub',
+    showApproved: 'Show approved version',
+    retry: 'Try again',
+    refresh: 'Refresh',
     busy: 'Working…',
+    approvedTitle: '📖 Approved version',
+    approvedSub: 'This is the version in effect.',
+    approvedDraftSub: 'You have a draft with changes to this document.',
+    approvedWaitingSub: 'Your change is waiting for approval.',
+    draftTitle: (n) => '✏️ Draft' + (n ? ` · ${n} changed ${n === 1 ? 'document' : 'documents'}` : ''),
+    draftSub: 'Your changes are saved automatically. They take effect once they have been approved.',
+    draftEmptySub: 'Make your changes in the document.',
+    waitingTitle: '⏳ Waiting for approval',
+    waitingSub: 'If you change more, publish again.',
+    otherTitle: (b) => `⎇ ${b}`,
+    otherSub: 'You are looking at a version other than the approved one.',
+    errorTitle: '⚠ Review Flow cannot work here',
     locked: 'This is the approved version. Click Edit to make changes.',
-    alreadyEditing: (n) => `You are editing the draft “${n}”.`,
-    draftCreated: (n) => `New draft “${n}”. Your changes stay in the draft until they are approved.`,
-    draftOpened: (n) => `Continuing the draft “${n}”.`,
-    newDraft: '+ New draft',
-    continueDraft: (n) => `Continue: ${n}`,
-    pickDraft: 'Continue a draft or start a new one',
     nothingToSave: 'No changes to save.',
     saved: 'Saved.',
-    savedLocal: 'Saved on this computer only (no connection). It is uploaded the next time you save.',
-    nothingToPublish: 'Nothing to publish. Click Edit and make a change first.',
+    savedLocal: 'Saved on this computer only (no connection). It is uploaded the next time.',
+    nothingToPublish: 'Nothing to publish. Make a change first.',
     publishTitle: 'Publish for approval',
     publishIntro: 'Your changes are sent for review. They take effect when they have been approved.',
     fieldTitle: 'What did you change?',
@@ -53,10 +62,8 @@ const STRINGS = {
     cancel: 'Cancel',
     published: 'Sent for approval. The change shows here once it has been approved.',
     republished: 'The approval request is updated with your latest changes.',
-    openOnGithub: 'Open on GitHub',
-    discardConfirm: (n) => `Discard the draft “${n}”? All changes in it are deleted and any open approval request is closed. This cannot be undone.`,
+    discardConfirm: 'Discard this draft? All changes in it are deleted and any open approval request is closed. This cannot be undone.',
     discarded: 'The draft was discarded.',
-    backedToBase: 'Showing the approved version.',
     commitMsg: (files) => `Draft: ${files}`,
     prFiles: 'Changed files',
     prFooter: 'Sent with Review Flow for Obsidian.',
@@ -72,7 +79,7 @@ const STRINGS = {
     setBase: 'Approved branch',
     setBaseDesc: 'The branch that holds the approved version, usually “main”.',
     setFolders: 'Folders',
-    setFoldersDesc: 'Comma-separated folders (relative to the vault) that are saved and published. Empty means the whole vault.',
+    setFoldersDesc: 'Comma-separated folders (relative to the vault) that are edited and published. Empty means the whole vault.',
     setPrefix: 'Draft branch prefix',
     setPrefixDesc: 'Draft branches are named <prefix><note>-<date>.',
     setLanguage: 'Language',
@@ -85,28 +92,35 @@ const STRINGS = {
   },
   sv: {
     edit: 'Redigera',
-    save: 'Spara',
+    continueEdit: 'Fortsätt redigera',
     publish: 'Publicera',
+    publishChanges: 'Publicera ändringarna',
+    saveAndClose: 'Spara och stäng',
+    save: 'Spara utkast',
     discard: 'Släng utkast',
-    backToBase: 'Tillbaka till godkänd version',
-    refresh: 'Uppdatera status',
-    openPr: 'Öppna begäran om godkännande på GitHub',
-    statusBase: '📖 Godkänd version',
-    statusDraft: (name, n) => `✏️ Utkast: ${name}` + (n ? ` · ${n} osparade` : ' · sparat'),
-    statusOther: (b) => `⎇ ${b}`,
-    statusError: '⚠ Review Flow',
+    done: 'Klar',
+    viewOnGithub: 'Visa på GitHub',
+    showApproved: 'Visa godkänd version',
+    retry: 'Försök igen',
+    refresh: 'Uppdatera',
     busy: 'Arbetar…',
+    approvedTitle: '📖 Godkänd version',
+    approvedSub: 'Det här är versionen som gäller.',
+    approvedDraftSub: 'Du har ett utkast med ändringar i det här dokumentet.',
+    approvedWaitingSub: 'Din ändring väntar på godkännande.',
+    draftTitle: (n) => '✏️ Utkast' + (n ? ` · ${n} ${n === 1 ? 'ändrat dokument' : 'ändrade dokument'}` : ''),
+    draftSub: 'Ändringarna sparas automatiskt. De gäller först när de har godkänts.',
+    draftEmptySub: 'Gör dina ändringar i dokumentet.',
+    waitingTitle: '⏳ Väntar på godkännande',
+    waitingSub: 'Ändrar du mer kan du publicera igen.',
+    otherTitle: (b) => `⎇ ${b}`,
+    otherSub: 'Du tittar på en annan version än den godkända.',
+    errorTitle: '⚠ Review Flow kan inte arbeta här',
     locked: 'Det här är den godkända versionen. Tryck på Redigera för att ändra.',
-    alreadyEditing: (n) => `Du redigerar utkastet ”${n}”.`,
-    draftCreated: (n) => `Nytt utkast ”${n}”. Ändringarna stannar i utkastet tills de har godkänts.`,
-    draftOpened: (n) => `Fortsätter med utkastet ”${n}”.`,
-    newDraft: '+ Nytt utkast',
-    continueDraft: (n) => `Fortsätt: ${n}`,
-    pickDraft: 'Fortsätt ett utkast eller starta ett nytt',
     nothingToSave: 'Inga ändringar att spara.',
     saved: 'Sparat.',
-    savedLocal: 'Sparat bara på den här datorn (ingen anslutning). Laddas upp nästa gång du sparar.',
-    nothingToPublish: 'Inget att publicera. Tryck på Redigera och gör en ändring först.',
+    savedLocal: 'Sparat bara på den här datorn (ingen anslutning). Laddas upp nästa gång.',
+    nothingToPublish: 'Inget att publicera. Gör en ändring först.',
     publishTitle: 'Publicera för godkännande',
     publishIntro: 'Ändringarna skickas för granskning. De gäller först när de har godkänts.',
     fieldTitle: 'Vad har du ändrat?',
@@ -114,10 +128,8 @@ const STRINGS = {
     cancel: 'Avbryt',
     published: 'Skickat för godkännande. Ändringen syns här när den har godkänts.',
     republished: 'Begäran om godkännande är uppdaterad med dina senaste ändringar.',
-    openOnGithub: 'Öppna på GitHub',
-    discardConfirm: (n) => `Släng utkastet ”${n}”? Alla ändringar i det raderas och en öppen begäran om godkännande stängs. Det går inte att ångra.`,
+    discardConfirm: 'Släng utkastet? Alla ändringar i det raderas och en öppen begäran om godkännande stängs. Det går inte att ångra.',
     discarded: 'Utkastet är slängt.',
-    backedToBase: 'Visar den godkända versionen.',
     commitMsg: (files) => `Utkast: ${files}`,
     prFiles: 'Ändrade filer',
     prFooter: 'Skickat med Review Flow för Obsidian.',
@@ -133,7 +145,7 @@ const STRINGS = {
     setBase: 'Godkänd gren',
     setBaseDesc: 'Grenen som har den godkända versionen, oftast ”main”.',
     setFolders: 'Mappar',
-    setFoldersDesc: 'Kommaseparerade mappar (relativt valvet) som sparas och publiceras. Tomt betyder hela valvet.',
+    setFoldersDesc: 'Kommaseparerade mappar (relativt valvet) som redigeras och publiceras. Tomt betyder hela valvet.',
     setPrefix: 'Prefix för utkastgrenar',
     setPrefixDesc: 'Utkastgrenar får namnet <prefix><anteckning>-<datum>.',
     setLanguage: 'Språk',
@@ -170,6 +182,10 @@ function stamp(d = new Date()) {
 
 function baseName(p) {
   return p.split('/').pop();
+}
+
+function lines(out) {
+  return out ? out.split('\n').filter(Boolean) : [];
 }
 
 // Parses `git status --porcelain -z` into repo-relative paths.
@@ -230,6 +246,10 @@ class GitFlow {
     return this.getSettings();
   }
 
+  get base() {
+    return this.s.baseBranch;
+  }
+
   git(...args) {
     return this.exec('git', args);
   }
@@ -247,29 +267,67 @@ class GitFlow {
     return !!branch && branch.startsWith(this.s.branchPrefix);
   }
 
-  displayName(branch) {
-    return branch.slice(this.s.branchPrefix.length).replace(/-\d{6}-\d{4}$/, '');
-  }
-
   async state() {
     const branch = await this.git('branch', '--show-current');
     const changes = parseStatus(await this.git('status', '--porcelain', '-z', '--untracked-files=all', '--', ...this.paths()));
-    return { branch, onBase: branch === this.s.baseBranch, isDraft: this.isDraft(branch), changes };
+    return { branch, onBase: branch === this.base, isDraft: this.isDraft(branch), changes };
   }
 
+  // Newest first.
   async drafts() {
-    const out = await this.git('branch', '--list', `${this.s.branchPrefix}*`, '--format=%(refname:short)');
-    return out ? out.split('\n').filter(Boolean) : [];
+    return lines(await this.git('branch', '--list', `${this.s.branchPrefix}*`, '--sort=-committerdate', '--format=%(refname:short)'));
+  }
+
+  // Vault-relative paths changed in a draft compared with the approved version.
+  async filesInDraft(branch) {
+    return lines(await this.git('diff', '--name-only', '--relative', `${this.base}...${branch}`, '--', ...this.paths()));
+  }
+
+  // Maps each changed file to the newest draft that changes it.
+  async draftsByFile() {
+    const map = new Map();
+    for (const d of await this.drafts()) {
+      for (const f of await this.filesInDraft(d)) if (!map.has(f)) map.set(f, d);
+    }
+    return map;
+  }
+
+  // Details about the current draft: files changed since the approved version, and whether anything is not uploaded.
+  async draftInfo() {
+    const st = await this.state();
+    const files = [...new Set([...(await this.filesInDraft('HEAD')), ...st.changes])];
+    let unpushed = true;
+    try {
+      unpushed = (await this.git('rev-list', '--count', '@{u}..HEAD')) !== '0';
+    } catch (e) {
+      // No upstream yet: nothing uploaded.
+    }
+    return { files, unpushed: unpushed || st.changes.length > 0 };
   }
 
   // Fetches the latest approved version. Returns false when offline.
   async updateBase() {
     try {
-      await this.git('pull', '--ff-only', 'origin', this.s.baseBranch);
+      await this.git('pull', '--ff-only', 'origin', this.base);
       return true;
     } catch (e) {
       return false;
     }
+  }
+
+  // The pull request for a branch as { url, state }, or null.
+  async prInfo(branch) {
+    try {
+      const pr = JSON.parse(await this.gh('pr', 'view', branch, '--json', 'url,state'));
+      return pr && pr.url ? { url: pr.url, state: pr.state } : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async prUrl(branch) {
+    const pr = await this.prInfo(branch);
+    return pr && pr.state === 'OPEN' ? pr.url : null;
   }
 
   // Removes local drafts whose pull request has been merged.
@@ -277,19 +335,14 @@ class GitFlow {
     const current = await this.git('branch', '--show-current');
     for (const d of await this.drafts()) {
       if (d === current) continue;
-      try {
-        if ((await this.gh('pr', 'view', d, '--json', 'state', '--jq', '.state')) === 'MERGED') {
-          await this.git('branch', '-D', d);
-        }
-      } catch (e) {
-        // No pull request or offline: keep the draft.
-      }
+      const pr = await this.prInfo(d);
+      if (pr && pr.state === 'MERGED') await this.git('branch', '-D', d);
     }
   }
 
   async startDraft(label) {
     const st = await this.state();
-    if (!st.onBase) await this.git('switch', this.s.baseBranch);
+    if (!st.onBase) await this.git('switch', this.base);
     if (!st.changes.length) await this.updateBase();
     const name = `${this.s.branchPrefix}${slugify(label)}-${stamp()}`;
     await this.git('switch', '-c', name);
@@ -326,50 +379,36 @@ class GitFlow {
     return { saved: true, created, pushed, branch: created || st.branch };
   }
 
-  async changedSinceBase() {
-    const st = await this.state();
-    let files = [];
-    if (st.isDraft) {
-      const out = await this.git('diff', '--name-only', `${this.s.baseBranch}...HEAD`, '--', ...this.paths());
-      files = out ? out.split('\n') : [];
-    }
-    return [...new Set([...files, ...st.changes])];
-  }
-
-  async prUrl(branch) {
-    try {
-      const out = await this.gh('pr', 'view', branch, '--json', 'url,state', '--jq', 'select(.state == "OPEN") | .url');
-      return out || null;
-    } catch (e) {
-      return null;
-    }
-  }
-
   // Saves, uploads and opens (or updates) a pull request, then returns to the approved version.
   async publish(title, details) {
-    const files = await this.changedSinceBase();
     await this.save();
     const st = await this.state();
     if (!st.isDraft) throw new FlowError('nothingToPublish');
-    if ((await this.git('rev-list', '--count', `${this.s.baseBranch}..HEAD`)) === '0') throw new FlowError('nothingToPublish');
+    const files = await this.filesInDraft('HEAD');
+    if (!files.length) throw new FlowError('nothingToPublish');
     await this.push(true);
     let url = await this.prUrl(st.branch);
     const updated = !!url;
     if (!url) {
       const body = [details, `${this.t('prFiles')}:\n` + files.map((f) => `- ${f}`).join('\n'), `_${this.t('prFooter')}_`]
         .filter(Boolean).join('\n\n');
-      const out = await this.gh('pr', 'create', '--base', this.s.baseBranch, '--head', st.branch, '--title', title, '--body', body);
+      const out = await this.gh('pr', 'create', '--base', this.base, '--head', st.branch, '--title', title, '--body', body);
       url = out.split('\n').pop().trim();
     }
-    await this.git('switch', this.s.baseBranch);
+    await this.git('switch', this.base);
     await this.updateBase();
     return { url, updated, branch: st.branch };
   }
 
+  // Leaves the draft (saving it first) and shows the approved version. A draft without changes is removed.
   async backToBase() {
     const st = await this.state();
-    if (st.changes.length && st.isDraft) await this.save();
-    await this.git('switch', this.s.baseBranch);
+    if (st.isDraft && st.changes.length) await this.save();
+    await this.git('switch', this.base);
+    if (st.isDraft && (await this.git('rev-list', '--count', `${this.base}..${st.branch}`)) === '0') {
+      await this.git('branch', '-D', st.branch);
+      await this.git('push', 'origin', '--delete', st.branch).catch(() => {});
+    }
     await this.updateBase();
   }
 
@@ -379,7 +418,7 @@ class GitFlow {
     if (!st.isDraft) throw new FlowError('errNotOnDraft');
     await this.git('reset', '--hard', 'HEAD');
     await this.git('clean', '-fd', '--', ...this.paths());
-    await this.git('switch', this.s.baseBranch);
+    await this.git('switch', this.base);
     await this.git('branch', '-D', st.branch);
     try {
       if (await this.prUrl(st.branch)) await this.gh('pr', 'close', st.branch, '--delete-branch');
@@ -393,29 +432,6 @@ class GitFlow {
 
 // ---------- Obsidian UI ----------
 
-class DraftPicker extends SuggestModal {
-  constructor(plugin, drafts, onChoose) {
-    super(plugin.app);
-    this.plugin = plugin;
-    this.items = [null, ...drafts];
-    this.onChoose = onChoose;
-    this.setPlaceholder(plugin.t('pickDraft'));
-  }
-
-  getSuggestions(query) {
-    const q = query.toLowerCase();
-    return this.items.filter((d) => d === null || d.toLowerCase().includes(q));
-  }
-
-  renderSuggestion(d, el) {
-    el.setText(d === null ? this.plugin.t('newDraft') : this.plugin.t('continueDraft', this.plugin.flow.displayName(d)));
-  }
-
-  onChooseSuggestion(d) {
-    this.onChoose(d);
-  }
-}
-
 class PublishModal extends Modal {
   constructor(plugin, defaultTitle, onSubmit) {
     super(plugin.app);
@@ -427,11 +443,17 @@ class PublishModal extends Modal {
 
   onOpen() {
     const t = (k) => this.plugin.t(k);
+    const submit = () => {
+      if (!this.title.trim()) return;
+      this.close();
+      this.onSubmit(this.title.trim(), this.details.trim());
+    };
     this.titleEl.setText(t('publishTitle'));
     this.contentEl.createEl('p', { text: t('publishIntro') });
     new Setting(this.contentEl).setName(t('fieldTitle')).addText((c) => {
       c.setValue(this.title).onChange((v) => (this.title = v));
       c.inputEl.addClass('review-flow-wide');
+      c.inputEl.addEventListener('keydown', (e) => e.key === 'Enter' && submit());
       setTimeout(() => c.inputEl.select(), 0);
     });
     new Setting(this.contentEl).setName(t('fieldBody')).addTextArea((c) => {
@@ -441,13 +463,7 @@ class PublishModal extends Modal {
     });
     new Setting(this.contentEl)
       .addButton((b) => b.setButtonText(t('cancel')).onClick(() => this.close()))
-      .addButton((b) =>
-        b.setButtonText(t('publish')).setCta().onClick(() => {
-          if (!this.title.trim()) return;
-          this.close();
-          this.onSubmit(this.title.trim(), this.details.trim());
-        })
-      );
+      .addButton((b) => b.setButtonText(t('publish')).setCta().onClick(submit));
   }
 
   onClose() {
@@ -486,6 +502,8 @@ class ReviewFlowPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.busy = false;
     this.state = null;
+    this.prCache = new Map();
+    this.prLoading = new Set();
     this.lastLockNotice = 0;
     this.flow = new GitFlow(
       makeExec(() => this.vaultPath(), () => this.settings),
@@ -493,33 +511,32 @@ class ReviewFlowPlugin extends Plugin {
       (k, ...a) => this.t(k, ...a)
     );
 
-    this.statusEl = this.addStatusBarItem();
-    this.statusEl.addClass('review-flow-status');
-    this.statusEl.onClickEvent((evt) => this.showMenu(evt));
-
-    this.addRibbonIcon('pencil', this.t('edit'), () => this.edit());
-    this.addRibbonIcon('save', this.t('save'), () => this.save());
-    this.addRibbonIcon('send', this.t('publish'), () => this.publish());
-
     this.addCommand({ id: 'edit', name: this.t('edit'), callback: () => this.edit() });
-    this.addCommand({ id: 'save', name: this.t('save'), callback: () => this.save() });
     this.addCommand({ id: 'publish', name: this.t('publish'), callback: () => this.publish() });
-    this.addCommand({ id: 'back-to-approved', name: this.t('backToBase'), callback: () => this.backToBase() });
+    this.addCommand({ id: 'save-and-close', name: this.t('saveAndClose'), callback: () => this.backToBase() });
+    this.addCommand({ id: 'save', name: this.t('save'), callback: () => this.save() });
     this.addCommand({ id: 'discard', name: this.t('discard'), callback: () => this.discard() });
     this.addCommand({ id: 'refresh', name: this.t('refresh'), callback: () => this.refresh() });
 
     this.addSettingTab(new ReviewFlowSettingTab(this.app, this));
 
-    const lock = () => this.enforceLock();
-    this.registerEvent(this.app.workspace.on('layout-change', lock));
-    this.registerEvent(this.app.workspace.on('active-leaf-change', lock));
-    this.registerEvent(this.app.workspace.on('file-open', lock));
+    const layout = () => {
+      this.renderBars();
+      this.enforceLock();
+    };
+    this.registerEvent(this.app.workspace.on('layout-change', layout));
+    this.registerEvent(this.app.workspace.on('active-leaf-change', layout));
+    this.registerEvent(this.app.workspace.on('file-open', layout));
     const soon = () => this.refreshSoon();
     for (const evt of ['modify', 'create', 'delete', 'rename']) this.registerEvent(this.app.vault.on(evt, soon));
     this.registerDomEvent(window, 'focus', soon);
     this.registerInterval(window.setInterval(() => this.refresh(), 30000));
 
     this.app.workspace.onLayoutReady(() => this.refresh());
+  }
+
+  onunload() {
+    document.querySelectorAll('.review-flow-bar').forEach((el) => el.remove());
   }
 
   lang() {
@@ -542,39 +559,133 @@ class ReviewFlowPlugin extends Plugin {
     this.refresh();
   }
 
-  // ----- State and status bar -----
+  // ----- State -----
 
   refreshSoon() {
     window.clearTimeout(this.refreshTimer);
     this.refreshTimer = window.setTimeout(() => this.refresh(), 800);
   }
 
+  async loadState() {
+    const st = await this.flow.state();
+    if (st.isDraft) Object.assign(st, await this.flow.draftInfo());
+    else st.fileDrafts = await this.flow.draftsByFile();
+    return st;
+  }
+
   async refresh() {
     if (this.busy) return;
     try {
-      this.state = await this.flow.state();
+      this.state = await this.loadState();
     } catch (e) {
       this.state = { error: e };
     }
-    this.renderStatus();
+    this.renderBars();
     this.enforceLock();
   }
 
-  renderStatus() {
-    const s = this.state;
-    if (!s) return;
-    let text;
-    if (s.error) text = this.t('statusError');
-    else if (s.isDraft) text = this.t('statusDraft', this.flow.displayName(s.branch), s.changes.length);
-    else if (s.onBase) text = this.t('statusBase');
-    else text = this.t('statusOther', s.branch || '?');
-    this.statusEl.setText(this.busy ? `${text} · ${this.t('busy')}` : text);
-    this.statusEl.setAttr('aria-label', s.error ? this.describeError(s.error) : '');
+  // Pull request info from a short-lived cache; a stale entry is reloaded in the background.
+  pr(branch) {
+    const c = this.prCache.get(branch);
+    if (!c || Date.now() - c.at > PR_MAX_AGE) this.loadPr(branch);
+    return c ? c.info : null;
+  }
+
+  async loadPr(branch) {
+    if (this.prLoading.has(branch)) return;
+    this.prLoading.add(branch);
+    try {
+      this.prCache.set(branch, { info: await this.flow.prInfo(branch), at: Date.now() });
+    } finally {
+      this.prLoading.delete(branch);
+    }
+    this.renderBars();
   }
 
   inScope(path) {
     const folders = this.flow.paths();
     return folders.includes('.') || folders.some((f) => path === f || path.startsWith(f + '/'));
+  }
+
+  // ----- The bar above each note -----
+
+  renderBars() {
+    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+      const view = leaf.view;
+      if (!(view instanceof MarkdownView)) continue;
+      let bar = view.containerEl.querySelector(':scope > .review-flow-bar');
+      if (!view.file || !this.state || !this.inScope(view.file.path)) {
+        if (bar) bar.remove();
+        continue;
+      }
+      if (!bar) {
+        bar = createDiv({ cls: 'review-flow-bar' });
+        view.containerEl.insertBefore(bar, view.contentEl);
+      }
+      this.renderBar(bar, view);
+    }
+  }
+
+  renderBar(bar, view) {
+    const s = this.state;
+    const t = (k, ...a) => this.t(k, ...a);
+    bar.empty();
+    bar.className = 'review-flow-bar';
+    const text = bar.createDiv({ cls: 'review-flow-text' });
+    const actions = bar.createDiv({ cls: 'review-flow-actions' });
+    const show = (cls, title, sub) => {
+      bar.addClass(cls);
+      text.createDiv({ cls: 'review-flow-title', text: title });
+      if (sub) text.createDiv({ cls: 'review-flow-sub', text: sub });
+    };
+    const link = (label, fn) => {
+      const b = actions.createEl('button', { cls: 'review-flow-link', text: label });
+      b.disabled = this.busy;
+      b.onclick = fn;
+    };
+    const main = (label, fn, disabled) => {
+      const b = actions.createEl('button', { cls: 'mod-cta review-flow-main', text: this.busy ? t('busy') : label });
+      b.disabled = this.busy || !!disabled;
+      b.onclick = fn;
+    };
+    const open = (url) => () => window.open(url);
+
+    if (s.error) {
+      show('is-error', t('errorTitle'), this.describeError(s.error));
+      main(t('retry'), () => this.refresh());
+      return;
+    }
+
+    if (s.isDraft) {
+      const pr = this.pr(s.branch);
+      const waiting = pr && pr.state === 'OPEN';
+      if (waiting && !s.unpushed) {
+        show('is-waiting', t('waitingTitle'), t('waitingSub'));
+        link(t('viewOnGithub'), open(pr.url));
+        link(t('discard'), () => this.discard());
+        main(t('done'), () => this.backToBase());
+        return;
+      }
+      show('is-draft', t('draftTitle', s.files.length), t(s.files.length ? 'draftSub' : 'draftEmptySub'));
+      if (waiting) link(t('viewOnGithub'), open(pr.url));
+      link(t('saveAndClose'), () => this.backToBase());
+      link(t('discard'), () => this.discard());
+      main(t(waiting ? 'publishChanges' : 'publish'), () => this.publish(), !s.files.length);
+      return;
+    }
+
+    if (!s.onBase) {
+      show('is-other', t('otherTitle', s.branch || '?'), t('otherSub'));
+      main(t('showApproved'), () => this.backToBase());
+      return;
+    }
+
+    const draft = s.fileDrafts.get(view.file.path);
+    const pr = draft && this.pr(draft);
+    const waiting = pr && pr.state === 'OPEN';
+    show('is-approved', t('approvedTitle'), t(!draft ? 'approvedSub' : waiting ? 'approvedWaitingSub' : 'approvedDraftSub'));
+    if (waiting) link(t('viewOnGithub'), open(pr.url));
+    main(t(draft ? 'continueEdit' : 'edit'), () => this.edit(view));
   }
 
   // Keeps notes in reading view while the approved version is shown.
@@ -585,8 +696,7 @@ class ReviewFlowPlugin extends Plugin {
       const view = leaf.view;
       if (!(view instanceof MarkdownView) || !view.file || !this.inScope(view.file.path)) continue;
       if (view.getMode() !== 'source') continue;
-      const vs = leaf.getViewState();
-      leaf.setViewState({ ...vs, state: { ...vs.state, mode: 'preview' } });
+      this.setMode(view, 'preview');
       if (Date.now() - this.lastLockNotice > 5000) {
         this.lastLockNotice = Date.now();
         new Notice(this.t('locked'));
@@ -594,12 +704,10 @@ class ReviewFlowPlugin extends Plugin {
     }
   }
 
-  setEditMode() {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!view || view.getMode() === 'source') return;
-    const leaf = view.leaf;
-    const vs = leaf.getViewState();
-    leaf.setViewState({ ...vs, state: { ...vs.state, mode: 'source' } });
+  setMode(view, mode) {
+    if (!view || view.getMode() === mode) return;
+    const vs = view.leaf.getViewState();
+    view.leaf.setViewState({ ...vs, state: { ...vs.state, mode } });
   }
 
   // Writes any pending editor changes to disk before git looks at the files.
@@ -622,14 +730,14 @@ class ReviewFlowPlugin extends Plugin {
     return this.t('errGeneric', line);
   }
 
-  // Runs one action at a time, shows errors in plain language and refreshes the status afterwards.
+  // Runs one action at a time, shows errors in plain language and refreshes afterwards.
   async run(action) {
     if (this.busy) {
       new Notice(this.t('busy'));
       return;
     }
     this.busy = true;
-    this.renderStatus();
+    this.renderBars();
     try {
       await action();
     } catch (e) {
@@ -637,48 +745,29 @@ class ReviewFlowPlugin extends Plugin {
       new Notice(this.describeError(e), 10000);
     } finally {
       this.busy = false;
+      this.lastLockNotice = Date.now(); // the bar already says what happened
       await this.refresh();
     }
   }
 
-  linkNotice(message, url) {
-    const frag = createFragment((f) => {
-      f.createSpan({ text: message + ' ' });
-      if (url) f.createEl('a', { text: this.t('openOnGithub'), href: url });
-    });
-    new Notice(frag, 15000);
-  }
-
   // ----- Actions -----
 
-  edit() {
+  // Opens the draft that already changes this note, or starts a new one.
+  edit(view) {
+    view = view || this.app.workspace.getActiveViewOfType(MarkdownView);
+    const file = view && view.file;
     return this.run(async () => {
       const st = await this.flow.state();
-      if (st.isDraft) {
-        this.setEditMode();
-        new Notice(this.t('alreadyEditing', this.flow.displayName(st.branch)));
-        return;
+      if (!st.isDraft) {
+        await this.flow.updateBase();
+        await this.flow.cleanupMerged();
+        const draft = file && (await this.flow.draftsByFile()).get(file.path);
+        if (draft) await this.flow.openDraft(draft);
+        else await this.flow.startDraft(file ? file.basename : 'draft');
+        this.state = await this.loadState();
       }
-      await this.flow.updateBase();
-      await this.flow.cleanupMerged();
-      const drafts = await this.flow.drafts();
-      if (!drafts.length) return this.newDraft();
-      new DraftPicker(this, drafts, (d) =>
-        this.run(async () => {
-          if (d === null) return this.newDraft();
-          await this.flow.openDraft(d);
-          this.setEditMode();
-          new Notice(this.t('draftOpened', this.flow.displayName(d)));
-        })
-      ).open();
+      this.setMode(view, 'source');
     });
-  }
-
-  async newDraft() {
-    const file = this.app.workspace.getActiveFile();
-    const name = await this.flow.startDraft(file ? file.basename : 'draft');
-    this.setEditMode();
-    new Notice(this.t('draftCreated', this.flow.displayName(name)), 8000);
   }
 
   save() {
@@ -686,7 +775,6 @@ class ReviewFlowPlugin extends Plugin {
       await this.flushEditors();
       const r = await this.flow.save();
       if (!r.saved) return new Notice(this.t('nothingToSave'));
-      if (r.created) new Notice(this.t('draftCreated', this.flow.displayName(r.created)), 8000);
       new Notice(this.t(r.pushed ? 'saved' : 'savedLocal'), r.pushed ? 3000 : 10000);
     });
   }
@@ -695,17 +783,22 @@ class ReviewFlowPlugin extends Plugin {
     return this.run(async () => {
       await this.flushEditors();
       const st = await this.flow.state();
-      if (!st.isDraft && !(st.onBase && st.changes.length)) return new Notice(this.t('nothingToPublish'));
+      const files = st.isDraft ? (await this.flow.draftInfo()).files : st.changes;
+      if (!files.length) return new Notice(this.t('nothingToPublish'));
       const doPublish = async (title, details) => {
         await this.flushEditors();
         const r = await this.flow.publish(title, details);
-        this.linkNotice(this.t(r.updated ? 'republished' : 'published'), r.url);
+        this.prCache.delete(r.branch);
+        const frag = createFragment((f) => {
+          f.createSpan({ text: this.t(r.updated ? 'republished' : 'published') + ' ' });
+          f.createEl('a', { text: this.t('viewOnGithub'), href: r.url });
+        });
+        new Notice(frag, 15000);
       };
       // Already waiting for approval: just upload the latest changes.
       if (st.isDraft && (await this.flow.prUrl(st.branch))) return doPublish('', '');
-      const files = await this.flow.changedSinceBase();
       const title = files.map((f) => baseName(f).replace(/\.md$/, '')).slice(0, 3).join(', ');
-      new PublishModal(this, title, (t, d) => this.run(() => doPublish(t, d))).open();
+      new PublishModal(this, title, (ti, d) => this.run(() => doPublish(ti, d))).open();
     });
   }
 
@@ -713,39 +806,16 @@ class ReviewFlowPlugin extends Plugin {
     return this.run(async () => {
       await this.flushEditors();
       await this.flow.backToBase();
-      new Notice(this.t('backedToBase'));
     });
   }
 
   discard() {
-    const st = this.state;
-    if (!st || !st.isDraft) return new Notice(this.t('errNotOnDraft'));
-    new ConfirmModal(this, this.t('discardConfirm', this.flow.displayName(st.branch)), this.t('discard'), () =>
+    new ConfirmModal(this, this.t('discardConfirm'), this.t('discard'), () =>
       this.run(async () => {
         await this.flow.discard();
         new Notice(this.t('discarded'));
       })
     ).open();
-  }
-
-  async showMenu(evt) {
-    const s = this.state || {};
-    const menu = new Menu();
-    if (s.error) menu.addItem((i) => i.setTitle(this.describeError(s.error)).setIcon('alert-triangle').setDisabled(true));
-    if (s.isDraft) {
-      menu.addItem((i) => i.setTitle(this.t('save')).setIcon('save').onClick(() => this.save()));
-      menu.addItem((i) => i.setTitle(this.t('publish')).setIcon('send').onClick(() => this.publish()));
-      const url = await this.flow.prUrl(s.branch);
-      if (url) menu.addItem((i) => i.setTitle(this.t('openPr')).setIcon('external-link').onClick(() => window.open(url)));
-      menu.addSeparator();
-      menu.addItem((i) => i.setTitle(this.t('backToBase')).setIcon('book-open').onClick(() => this.backToBase()));
-      menu.addItem((i) => i.setTitle(this.t('discard')).setIcon('trash').onClick(() => this.discard()));
-    } else if (!s.error) {
-      menu.addItem((i) => i.setTitle(this.t('edit')).setIcon('pencil').onClick(() => this.edit()));
-    }
-    menu.addSeparator();
-    menu.addItem((i) => i.setTitle(this.t('refresh')).setIcon('refresh-cw').onClick(() => this.refresh()));
-    menu.showAtMouseEvent(evt);
   }
 }
 
