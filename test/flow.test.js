@@ -331,7 +331,11 @@ test('a new vault gets the documents from the repository and keeps its own files
   fs.writeFileSync(path.join(fresh, '.obsidian', 'app.json'), '{}\n');
   fs.writeFileSync(path.join(fresh, 'Min anteckning.md'), 'egen\n');
   const s = { ...settings, folders: 'qms', baseBranch: 'unknown' };
-  const f = new GitFlow(makeExec(() => fresh, () => s), () => s, t, () => fresh);
+  const files = {
+    exists: async (p) => fs.existsSync(path.join(fresh, p)),
+    remove: async (p) => fs.rmSync(path.join(fresh, p), { recursive: true, force: true }),
+  };
+  const f = new GitFlow(makeExec(() => fresh, () => s), () => s, t, files);
   assert.strictEqual(await f.setupStep(), 'repo');
 
   await assert.rejects(f.connect(path.join(tmp, 'missing.git')));

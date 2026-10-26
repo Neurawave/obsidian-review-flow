@@ -9,7 +9,6 @@ const obsidian = require('obsidian');
 const { Plugin, ItemView, Notice, Modal, Setting, PluginSettingTab, FileSystemAdapter } = obsidian;
 const { execFile, spawn } = require('child_process');
 const nodePath = require('path');
-const fs = require('fs');
 
 const VIEW_TYPE = 'review-flow';
 const PR_MAX_AGE = 60000;
@@ -292,11 +291,12 @@ function makeExec(getCwd, getSettings) {
 // ---------- Git flow (no Obsidian dependencies, tested on its own) ----------
 
 class GitFlow {
-  constructor(exec, getSettings, t, getCwd) {
+  // `files` checks and removes folders in the vault: { exists(path), remove(path) }, both async.
+  constructor(exec, getSettings, t, files) {
     this.exec = exec;
     this.getSettings = getSettings;
     this.t = t;
-    this.getCwd = getCwd;
+    this.files = files;
     this.excluded = ['.obsidian', '.trash'];
   }
 
@@ -368,8 +368,7 @@ class GitFlow {
     const input = repo.trim().replace(/\/+$/, '');
     const url = /^[\w.-]+\/[\w.-]+$/.test(input) ? `https://github.com/${input.replace(/\.git$/, '')}.git` : input;
     if (/^https:\/\/github\.com\//.test(url)) await this.gh('auth', 'setup-git', '--hostname', 'github.com');
-    const gitDir = nodePath.join(this.getCwd(), '.git');
-    if (fs.existsSync(gitDir)) throw new FlowError('errAlreadyRepo');
+    if (await this.files.exists('.git')) throw new FlowError('errAlreadyRepo');
     try {
       await this.git('init', '-q');
       await this.git('remote', 'add', 'origin', url);
@@ -379,7 +378,7 @@ class GitFlow {
       await this.git('checkout', '-q', '-B', branch, '--track', `origin/${branch}`);
       return branch;
     } catch (e) {
-      fs.rmSync(gitDir, { recursive: true, force: true });
+      if (await this.files.exists('.git')) await this.files.remove('.git');
       throw e;
     }
   }
@@ -810,7 +809,10 @@ class ReviewFlowPlugin extends Plugin {
       makeExec(() => this.vaultPath(), () => this.settings),
       () => this.settings,
       (k, ...a) => this.t(k, ...a),
-      () => this.vaultPath()
+      {
+        exists: (path) => this.app.vault.adapter.exists(path),
+        remove: (path) => this.app.vault.adapter.rmdir(path, true),
+      }
     );
     this.connectForm = { repo: '', folder: this.settings.folders };
     this.flow.excluded = [this.app.vault.configDir, '.trash'];

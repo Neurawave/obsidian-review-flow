@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -24,7 +26,17 @@ jobs:
         run: |
           git config --global user.name ci
           git config --global user.email ci@example.com
+          npm ci
           npm test
+      # Lets anyone verify that the release files were built from this repository:
+      # gh attestation verify main.js --repo granlov/obsidian-review-flow
+      - name: Attest release files
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
