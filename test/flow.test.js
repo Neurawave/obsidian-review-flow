@@ -352,3 +352,20 @@ test('a new vault gets the documents from the repository and keeps its own files
   assert.deepStrictEqual(st.changes, []);
   await assert.rejects(f.connect(remote), /errAlreadyRepo/);
 });
+
+test('saving works when git already ignores the Obsidian config folder', async () => {
+  await flow.switchTo('main');
+  fs.appendFileSync(path.join(vault, '.git', 'info', 'exclude'), '.obsidian/\n');
+  write('.obsidian/app.json', '{}\n');
+  try {
+    await flow.startDraft('ignored');
+    write('qms/SOP-001.md', read('qms/SOP-001.md') + 'Ignorerad konfig.\n');
+    const r = await flow.save();
+    assert.strictEqual(r.saved, true);
+    assert.deepStrictEqual(sh(vault, 'show', '--name-only', '--format=', 'HEAD').split('\n'), ['qms/SOP-001.md']);
+    await flow.discard();
+  } finally {
+    const p = path.join(vault, '.git', 'info', 'exclude');
+    fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace('.obsidian/\n', ''));
+  }
+});

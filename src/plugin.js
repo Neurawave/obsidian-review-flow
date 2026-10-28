@@ -332,9 +332,15 @@ class GitFlow {
   }
 
   // The folders in scope, never Obsidian's own config folder or trash (they must not be committed or cleaned).
-  pathspecs() {
-    return [...this.paths(), ...this.excluded.map((x) => `:(exclude)${x}`)];
+  // A folder git already ignores needs no exclude; excluding it anyway makes `git add` fail.
+  async pathspecs() {
+    const excludes = [];
+    for (const x of this.excluded) {
+      if ((await this.gitOr('', 'check-ignore', x)) === '') excludes.push(`:(exclude)${x}`);
+    }
+    return [...this.paths(), ...excludes];
   }
+
 
   isDraft(branch) {
     return !!branch && branch.startsWith(this.s.branchPrefix);
@@ -398,7 +404,7 @@ class GitFlow {
 
   async state() {
     const branch = await this.git('branch', '--show-current');
-    const changes = parseStatus(await this.git('status', '--porcelain', '-z', '--untracked-files=all', '--', ...this.pathspecs()));
+    const changes = parseStatus(await this.git('status', '--porcelain', '-z', '--untracked-files=all', '--', ...(await this.pathspecs())));
     return { branch, onBase: branch === this.base, isDraft: this.isDraft(branch), changes };
   }
 
@@ -409,7 +415,7 @@ class GitFlow {
 
   // Vault-relative paths changed in a draft compared with the approved version.
   async filesInDraft(branch) {
-    return lines(await this.git('diff', '--name-only', '--relative', `${this.base}...${branch}`, '--', ...this.pathspecs()));
+    return lines(await this.git('diff', '--name-only', '--relative', `${this.base}...${branch}`, '--', ...(await this.pathspecs())));
   }
 
   // Details about the current draft: files changed since the approved version, and whether anything is not uploaded.
@@ -495,7 +501,7 @@ class GitFlow {
       created = `${this.s.branchPrefix}${slugify(baseName(st.changes[0]).replace(/\.md$/, ''))}-${stamp()}`;
       await this.git('switch', '-c', created);
     }
-    await this.git('add', '-A', '--', ...this.pathspecs());
+    await this.git('add', '-A', '--', ...(await this.pathspecs()));
     await this.git('commit', '-m', this.t('commitMsg', summarize(st.changes)));
     const pushed = await this.push(false);
     return { saved: true, created, pushed, branch: created || st.branch };
@@ -544,7 +550,7 @@ class GitFlow {
     const st = await this.state();
     if (!st.isDraft) throw new FlowError('errNotOnDraft');
     await this.git('reset', '--hard', 'HEAD');
-    await this.git('clean', '-fd', '--', ...this.pathspecs());
+    await this.git('clean', '-fd', '--', ...(await this.pathspecs()));
     await this.git('switch', this.base);
     await this.git('branch', '-D', st.branch);
     try {
