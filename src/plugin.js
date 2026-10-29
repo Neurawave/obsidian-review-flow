@@ -21,6 +21,7 @@ const DEFAULT_SETTINGS = {
   language: 'auto',
   gitPath: '',
   ghPath: '',
+  panelShown: false,
 };
 
 // ---------- Strings ----------
@@ -678,6 +679,12 @@ class ChangesView extends ItemView {
   }
 
   async onOpen() {
+    // One panel only. A plugin update can restore the old panel next to a new one.
+    const others = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+    if (others.some((l) => l !== this.leaf && l.view instanceof ChangesView)) {
+      window.setTimeout(() => this.leaf.detach(), 0);
+      return;
+    }
     this.render();
   }
 
@@ -883,7 +890,12 @@ class ReviewFlowPlugin extends Plugin {
     this.registerInterval(window.setInterval(() => this.refresh(), 30000));
 
     this.app.workspace.onLayoutReady(async () => {
-      if (!this.app.workspace.getLeavesOfType(VIEW_TYPE).length) await this.showPanel(false);
+      // Open the panel by itself only the first time. Later Obsidian restores it where the user left it.
+      if (!this.settings.panelShown) {
+        if (!this.app.workspace.getLeavesOfType(VIEW_TYPE).length) await this.showPanel(false);
+        this.settings.panelShown = true;
+        await this.saveData(this.settings);
+      }
       this.refresh();
     });
   }
