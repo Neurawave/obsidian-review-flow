@@ -30,16 +30,16 @@ const STRINGS = {
     panelTitle: 'Changes',
     showPanel: 'Show changes',
     approvedOption: '📖 Approved version',
-    draftOption: (name, waiting) => `✏️ ${name}` + (waiting ? ' · waiting for approval' : ''),
+    draftOption: (name, waiting, own) => `${own ? '✏️' : '⎇'} ${name}` + (waiting ? ' · waiting for approval' : ''),
     otherOption: (b) => `⎇ ${b}`,
     noChanges: 'No changes',
     noChangesSub: 'Start typing in a document and a draft is created automatically.',
-    otherSub: (b) => `You are on the branch “${b}”, not the approved version.`,
-    otherCarry: 'Your changes come along into a new draft.',
-    changedDocs: (n) => `${n} changed ${n === 1 ? 'document' : 'documents'}`,
-    otherBlocked: (b) => `Your changes were made on “${b}”, where these documents differ from the approved version, so they cannot be moved automatically. Ask whoever manages the repository for help.`,
+    otherSub: 'You are not on a branch. Show the approved version to continue.',
+    discardChanges: 'Discard unsaved changes',
+    discardChangesConfirm: (b) => `Discard the changes made since “${b}” was last saved? The branch and everything saved in it stay.`,
     showApproved: 'Show approved version',
-    otherSend: 'Click Show approved version in the Changes panel first.',
+    merged: '✅ Already approved and merged into the approved version.',
+    mergedCarry: 'Your new changes come along into a new draft.',
     draftHeading: (n) => `Draft · ${n} changed ${n === 1 ? 'document' : 'documents'}`,
     draftEmpty: 'Draft · no changes yet',
     notSent: 'Not sent for approval yet.',
@@ -116,16 +116,16 @@ const STRINGS = {
     panelTitle: 'Ändringar',
     showPanel: 'Visa ändringar',
     approvedOption: '📖 Godkänd version',
-    draftOption: (name, waiting) => `✏️ ${name}` + (waiting ? ' · väntar på godkännande' : ''),
+    draftOption: (name, waiting, own) => `${own ? '✏️' : '⎇'} ${name}` + (waiting ? ' · väntar på godkännande' : ''),
     otherOption: (b) => `⎇ ${b}`,
     noChanges: 'Inga ändringar',
     noChangesSub: 'Börja skriva i ett dokument så skapas ett utkast automatiskt.',
-    otherSub: (b) => `Du står på grenen ”${b}”, inte på den godkända versionen.`,
-    otherCarry: 'Dina ändringar följer med till ett nytt utkast.',
-    changedDocs: (n) => `${n} ${n === 1 ? 'ändrat dokument' : 'ändrade dokument'}`,
-    otherBlocked: (b) => `Dina ändringar är gjorda på ”${b}”, där dokumenten skiljer sig från den godkända versionen, så de kan inte flyttas automatiskt. Be den som sköter repot om hjälp.`,
+    otherSub: 'Du står inte på någon gren. Visa den godkända versionen för att fortsätta.',
+    discardChanges: 'Släng osparade ändringar',
+    discardChangesConfirm: (b) => `Släng ändringarna sedan ”${b}” senast sparades? Grenen och allt som redan sparats i den finns kvar.`,
     showApproved: 'Visa godkänd version',
-    otherSend: 'Tryck först på Visa godkänd version i panelen Ändringar.',
+    merged: '✅ Redan godkänd och sammanslagen med den godkända versionen.',
+    mergedCarry: 'Dina nya ändringar följer med till ett nytt utkast.',
     draftHeading: (n) => `Utkast · ${n} ${n === 1 ? 'ändrat dokument' : 'ändrade dokument'}`,
     draftEmpty: 'Utkast · inga ändringar än',
     notSent: 'Inte skickat för godkännande än.',
@@ -352,12 +352,19 @@ class GitFlow {
   }
 
 
+  // Every branch except the approved one is a draft: the plugin's own (draft/...) and branches people make themselves.
   isDraft(branch) {
+    return !!branch && branch !== this.base;
+  }
+
+  // A draft the plugin created. Only these are ever deleted by the plugin.
+  isOwnDraft(branch) {
     return !!branch && branch.startsWith(this.s.branchPrefix);
   }
 
-  // A readable name for a draft branch: the document part without prefix and date.
+  // A readable name: for the plugin's own drafts, the document part without prefix and date.
   draftName(branch) {
+    if (!this.isOwnDraft(branch)) return branch;
     return branch.slice(this.s.branchPrefix.length).replace(/-\d{6}-\d{4}(\d{2})?$/, '');
   }
 
@@ -418,9 +425,10 @@ class GitFlow {
     return { branch, onBase: branch === this.base, isDraft: this.isDraft(branch), changes };
   }
 
-  // Newest first.
+  // All local branches except the approved one, newest first.
   async drafts() {
-    return lines(await this.git('branch', '--list', `${this.s.branchPrefix}*`, '--sort=-committerdate', '--format=%(refname:short)'));
+    const all = lines(await this.git('branch', '--sort=-committerdate', '--format=%(refname:short)'));
+    return all.filter((b) => b !== this.base);
   }
 
   // Vault-relative paths changed in a draft compared with the approved version.
@@ -441,10 +449,12 @@ class GitFlow {
     return { files, unpushed: unpushed || st.changes.length > 0 };
   }
 
-  // Fetches the latest approved version. Returns false when offline.
+  // Fetches the latest approved version: pulls it when it is checked out, otherwise moves the local branch forward.
+  // Returns false when offline.
   async updateBase() {
     try {
-      await this.git('pull', '--ff-only', 'origin', this.base);
+      if ((await this.git('branch', '--show-current')) === this.base) await this.git('pull', '--ff-only', 'origin', this.base);
+      else await this.git('fetch', 'origin', `${this.base}:${this.base}`);
       return true;
     } catch (e) {
       return false;
@@ -471,7 +481,7 @@ class GitFlow {
     const current = await this.git('branch', '--show-current');
     let removed = false;
     for (const d of await this.drafts()) {
-      if (d === current) continue;
+      if (d === current || !this.isOwnDraft(d)) continue;
       const pr = await this.prInfo(d);
       if (pr && pr.state === 'MERGED') {
         await this.git('branch', '-D', d);
@@ -517,35 +527,28 @@ class GitFlow {
     return { saved: true, created, pushed, branch: created || st.branch };
   }
 
-  // Saves the current draft and switches to `target` (a draft or the approved branch). A draft without changes is removed.
+  // Saves the current draft and switches to `target` (a draft or the approved branch). A draft without changes is
+  // removed. A draft that is already merged is not saved: new changes come along to the approved version instead.
   async switchTo(target) {
     const st = await this.state();
-    if (st.isDraft && st.changes.length) await this.save();
-    const current = await this.git('branch', '--show-current');
+    const current = st.branch;
+    const merged = st.isDraft && st.changes.length ? (await this.prInfo(current) || {}).state === 'MERGED' : false;
+    if (st.isDraft && st.changes.length && !merged) await this.save();
+    if (target === this.base) await this.updateBase();
     if (current !== target) await this.git('switch', target);
-    if (this.isDraft(current) && current !== target && (await this.git('rev-list', '--count', `${this.base}..${current}`)) === '0') {
+    if (this.isOwnDraft(current) && current !== target && (await this.git('rev-list', '--count', `${this.base}..${current}`)) === '0') {
       await this.git('branch', '-D', current);
       await this.gitOr(null, 'push', 'origin', '--delete', current);
     }
     if (target === this.base) await this.updateBase();
   }
 
-  // On another branch: changed files that differ between it and the approved version, so git cannot carry them over.
-  async blockedChanges() {
-    const st = await this.state();
-    const blocked = [];
-    for (const f of st.changes) {
-      const differs = await this.gitOr('x', 'diff', '--quiet', 'HEAD', this.base, '--', f);
-      if (differs !== '') blocked.push(f);
-    }
-    return blocked;
-  }
-
   backToBase() {
     return this.switchTo(this.base);
   }
 
-  // Saves, uploads and opens (or updates) a pull request, then returns to the approved version.
+  // Saves, uploads and opens (or updates) a pull request. The plugin's own drafts then return to the approved
+  // version; on a branch people made themselves, work goes on where it is.
   async publish(title, details) {
     await this.save();
     const st = await this.state();
@@ -561,17 +564,21 @@ class GitFlow {
       const out = await this.gh('pr', 'create', '--base', this.base, '--head', st.branch, '--title', title, '--body', body);
       url = out.split('\n').pop().trim();
     }
-    await this.git('switch', this.base);
-    await this.updateBase();
+    if (this.isOwnDraft(st.branch)) {
+      await this.git('switch', this.base);
+      await this.updateBase();
+    }
     return { url, updated, branch: st.branch };
   }
 
-  // Deletes the current draft locally and on GitHub, closing any open pull request.
+  // Deletes the plugin's own draft locally and on GitHub, closing any open pull request. On a branch people made
+  // themselves, only the changes since it was last saved are thrown away; the branch stays.
   async discard() {
     const st = await this.state();
     if (!st.isDraft) throw new FlowError('errNotOnDraft');
     await this.git('reset', '--hard', 'HEAD');
     await this.git('clean', '-fd', '--', ...(await this.pathspecs()));
+    if (!this.isOwnDraft(st.branch)) return st.branch;
     await this.git('switch', this.base);
     await this.git('branch', '-D', st.branch);
     try {
@@ -701,26 +708,17 @@ class ChangesView extends ItemView {
     option(p.settings.baseBranch, t('approvedOption'));
     for (const d of s.drafts) {
       const pr = p.pr(d);
-      option(d, t('draftOption', p.flow.draftName(d), pr && pr.state === 'OPEN'));
+      option(d, t('draftOption', p.flow.draftName(d), pr && pr.state === 'OPEN', p.flow.isOwnDraft(d)));
     }
     if (!s.onBase && !s.isDraft) option(s.branch, t('otherOption', s.branch || '?'));
     select.value = s.branch;
     select.disabled = p.busy;
     select.onchange = () => p.switchTo(select.value);
 
-    // Another branch than the approved one or a draft, for example one a developer works on.
+    // Not on any branch (detached HEAD), for example after checking out an old commit.
     if (!s.onBase && !s.isDraft) {
-      el.createDiv({ cls: 'review-flow-sub', text: t('otherSub', s.branch || '?') });
-      if (s.files.length) {
-        el.createDiv({ cls: 'review-flow-heading', text: t('changedDocs', s.files.length) });
-        this.renderFiles(el, s.files);
-      }
-      if (s.blocked.length) {
-        el.createDiv({ cls: 'review-flow-hint', text: t('otherBlocked', s.branch) });
-      } else {
-        if (s.files.length) el.createDiv({ cls: 'review-flow-sub', text: t('otherCarry') });
-        this.button(el, t('showApproved'), () => p.switchTo(p.settings.baseBranch), true);
-      }
+      el.createDiv({ cls: 'review-flow-sub', text: t('otherSub') });
+      this.button(el, t('showApproved'), () => p.switchTo(p.settings.baseBranch), true);
       return;
     }
 
@@ -745,6 +743,15 @@ class ChangesView extends ItemView {
     // Approval status
     const pr = s.isDraft ? p.pr(s.branch) : null;
     const waiting = pr && pr.state === 'OPEN';
+    if (pr && pr.state === 'MERGED') {
+      el.createDiv({ cls: 'review-flow-sub', text: t('merged') });
+      if (s.changes.length) {
+        this.renderFiles(el, s.changes);
+        el.createDiv({ cls: 'review-flow-sub', text: t('mergedCarry') });
+      }
+      this.button(el, t('showApproved'), () => p.switchTo(p.settings.baseBranch), true);
+      return;
+    }
     if (s.isDraft && files.length) {
       const status = el.createDiv({ cls: 'review-flow-sub' });
       status.setText(waiting ? t(s.unpushed ? 'waitingChanged' : 'waiting') : t('notSent'));
@@ -758,8 +765,10 @@ class ChangesView extends ItemView {
 
     // Actions
     if (files.length && (!waiting || s.unpushed)) this.button(el, t(waiting ? 'sendChanges' : 'send'), () => p.send(), true);
-    if (s.isDraft) {
-      const discard = el.createEl('button', { cls: 'review-flow-link', text: t('discard') });
+    // On a branch the plugin did not create, only unsaved changes can be thrown away.
+    const own = p.flow.isOwnDraft(s.branch);
+    if (s.isDraft && (own || s.changes.length)) {
+      const discard = el.createEl('button', { cls: 'review-flow-link', text: t(own ? 'discard' : 'discardChanges') });
       discard.disabled = p.busy;
       discard.onclick = () => p.discard();
     }
@@ -960,7 +969,6 @@ class ReviewFlowPlugin extends Plugin {
     st.drafts = await this.flow.drafts();
     if (st.isDraft) Object.assign(st, await this.flow.draftInfo());
     else st.files = st.changes;
-    st.blocked = !st.isDraft && !st.onBase && st.changes.length ? await this.flow.blockedChanges() : [];
     return st;
   }
 
@@ -982,6 +990,7 @@ class ReviewFlowPlugin extends Plugin {
       this.lastCleanup = Date.now();
       let removed = false;
       try {
+        if (!this.state.onBase) await this.flow.updateBase();
         removed = await this.flow.cleanupMerged();
       } catch (e) {
         // Offline: try again later.
@@ -1145,7 +1154,6 @@ class ReviewFlowPlugin extends Plugin {
     return this.run(async () => {
       await this.flushEditors();
       const st = await this.flow.state();
-      if (!st.isDraft && !st.onBase) return new Notice(this.t('otherSend'));
       const files = st.isDraft ? (await this.flow.draftInfo()).files : st.changes;
       if (!files.length) return new Notice(this.t('nothingToSend'));
       const doSend = async (title, details) => {
@@ -1166,13 +1174,17 @@ class ReviewFlowPlugin extends Plugin {
   }
 
   discard() {
-    new ConfirmModal(this, this.t('discardConfirm'), this.t('discard'), () =>
+    const branch = this.state && this.state.branch;
+    const own = this.flow.isOwnDraft(branch);
+    const message = own ? this.t('discardConfirm') : this.t('discardChangesConfirm', branch);
+    new ConfirmModal(this, message, this.t(own ? 'discard' : 'discardChanges'), () =>
       this.run(async () => {
         await this.flow.discard();
         new Notice(this.t('discarded'));
       })
     ).open();
   }
+
 }
 
 class ReviewFlowSettingTab extends PluginSettingTab {
