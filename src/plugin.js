@@ -34,7 +34,12 @@ const STRINGS = {
     otherOption: (b) => `⎇ ${b}`,
     noChanges: 'No changes',
     noChangesSub: 'Start typing in a document and a draft is created automatically.',
-    otherSub: 'You are looking at a version other than the approved one.',
+    otherSub: (b) => `You are on the branch “${b}”, not the approved version.`,
+    otherCarry: 'Your changes come along into a new draft.',
+    changedDocs: (n) => `${n} changed ${n === 1 ? 'document' : 'documents'}`,
+    otherBlocked: (b) => `Your changes were made on “${b}”, where these documents differ from the approved version, so they cannot be moved automatically. Ask whoever manages the repository for help.`,
+    showApproved: 'Show approved version',
+    otherSend: 'Click Show approved version in the Changes panel first.',
     draftHeading: (n) => `Draft · ${n} changed ${n === 1 ? 'document' : 'documents'}`,
     draftEmpty: 'Draft · no changes yet',
     notSent: 'Not sent for approval yet.',
@@ -115,7 +120,12 @@ const STRINGS = {
     otherOption: (b) => `⎇ ${b}`,
     noChanges: 'Inga ändringar',
     noChangesSub: 'Börja skriva i ett dokument så skapas ett utkast automatiskt.',
-    otherSub: 'Du tittar på en annan version än den godkända.',
+    otherSub: (b) => `Du står på grenen ”${b}”, inte på den godkända versionen.`,
+    otherCarry: 'Dina ändringar följer med till ett nytt utkast.',
+    changedDocs: (n) => `${n} ${n === 1 ? 'ändrat dokument' : 'ändrade dokument'}`,
+    otherBlocked: (b) => `Dina ändringar är gjorda på ”${b}”, där dokumenten skiljer sig från den godkända versionen, så de kan inte flyttas automatiskt. Be den som sköter repot om hjälp.`,
+    showApproved: 'Visa godkänd version',
+    otherSend: 'Tryck först på Visa godkänd version i panelen Ändringar.',
     draftHeading: (n) => `Utkast · ${n} ${n === 1 ? 'ändrat dokument' : 'ändrade dokument'}`,
     draftEmpty: 'Utkast · inga ändringar än',
     notSent: 'Inte skickat för godkännande än.',
@@ -510,7 +520,7 @@ class GitFlow {
   // Saves the current draft and switches to `target` (a draft or the approved branch). A draft without changes is removed.
   async switchTo(target) {
     const st = await this.state();
-    if (st.changes.length) await this.save();
+    if (st.isDraft && st.changes.length) await this.save();
     const current = await this.git('branch', '--show-current');
     if (current !== target) await this.git('switch', target);
     if (this.isDraft(current) && current !== target && (await this.git('rev-list', '--count', `${this.base}..${current}`)) === '0') {
@@ -518,6 +528,17 @@ class GitFlow {
       await this.gitOr(null, 'push', 'origin', '--delete', current);
     }
     if (target === this.base) await this.updateBase();
+  }
+
+  // On another branch: changed files that differ between it and the approved version, so git cannot carry them over.
+  async blockedChanges() {
+    const st = await this.state();
+    const blocked = [];
+    for (const f of st.changes) {
+      const differs = await this.gitOr('x', 'diff', '--quiet', 'HEAD', this.base, '--', f);
+      if (differs !== '') blocked.push(f);
+    }
+    return blocked;
   }
 
   backToBase() {
@@ -687,8 +708,19 @@ class ChangesView extends ItemView {
     select.disabled = p.busy;
     select.onchange = () => p.switchTo(select.value);
 
+    // Another branch than the approved one or a draft, for example one a developer works on.
     if (!s.onBase && !s.isDraft) {
-      el.createDiv({ cls: 'review-flow-sub', text: t('otherSub') });
+      el.createDiv({ cls: 'review-flow-sub', text: t('otherSub', s.branch || '?') });
+      if (s.files.length) {
+        el.createDiv({ cls: 'review-flow-heading', text: t('changedDocs', s.files.length) });
+        this.renderFiles(el, s.files);
+      }
+      if (s.blocked.length) {
+        el.createDiv({ cls: 'review-flow-hint', text: t('otherBlocked', s.branch) });
+      } else {
+        if (s.files.length) el.createDiv({ cls: 'review-flow-sub', text: t('otherCarry') });
+        this.button(el, t('showApproved'), () => p.switchTo(p.settings.baseBranch), true);
+      }
       return;
     }
 
@@ -722,21 +754,7 @@ class ChangesView extends ItemView {
       }
     }
 
-    // Changed documents
-    if (files.length) {
-      const list = el.createDiv({ cls: 'review-flow-files' });
-      for (const f of files) {
-        const file = p.app.vault.getAbstractFileByPath(f);
-        const item = list.createDiv({ cls: 'review-flow-file tree-item-self is-clickable' });
-        item.createSpan({ text: baseName(f).replace(/\.md$/, '') });
-        if (!file) {
-          item.addClass('is-deleted');
-          item.createSpan({ cls: 'review-flow-file-note', text: ` (${t('deleted')})` });
-        } else {
-          item.onclick = () => p.app.workspace.getLeaf(false).openFile(file);
-        }
-      }
-    }
+    if (files.length) this.renderFiles(el, files);
 
     // Actions
     if (files.length && (!waiting || s.unpushed)) this.button(el, t(waiting ? 'sendChanges' : 'send'), () => p.send(), true);
@@ -746,6 +764,23 @@ class ChangesView extends ItemView {
       discard.onclick = () => p.discard();
     }
     if (p.busy) el.createDiv({ cls: 'review-flow-sub', text: t('busy') });
+  }
+
+  // The changed documents; click one to open it.
+  renderFiles(el, files) {
+    const p = this.plugin;
+    const list = el.createDiv({ cls: 'review-flow-files' });
+    for (const f of files) {
+      const file = p.app.vault.getAbstractFileByPath(f);
+      const item = list.createDiv({ cls: 'review-flow-file tree-item-self is-clickable' });
+      item.createSpan({ text: baseName(f).replace(/\.md$/, '') });
+      if (!file) {
+        item.addClass('is-deleted');
+        item.createSpan({ cls: 'review-flow-file-note', text: ` (${p.t('deleted')})` });
+      } else {
+        item.onclick = () => p.app.workspace.getLeaf(false).openFile(file);
+      }
+    }
   }
 
   // First-time setup: one step at a time, with the action for that step.
@@ -925,6 +960,7 @@ class ReviewFlowPlugin extends Plugin {
     st.drafts = await this.flow.drafts();
     if (st.isDraft) Object.assign(st, await this.flow.draftInfo());
     else st.files = st.changes;
+    st.blocked = !st.isDraft && !st.onBase && st.changes.length ? await this.flow.blockedChanges() : [];
     return st;
   }
 
@@ -1109,6 +1145,7 @@ class ReviewFlowPlugin extends Plugin {
     return this.run(async () => {
       await this.flushEditors();
       const st = await this.flow.state();
+      if (!st.isDraft && !st.onBase) return new Notice(this.t('otherSend'));
       const files = st.isDraft ? (await this.flow.draftInfo()).files : st.changes;
       if (!files.length) return new Notice(this.t('nothingToSend'));
       const doSend = async (title, details) => {

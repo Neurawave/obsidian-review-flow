@@ -369,3 +369,33 @@ test('saving works when git already ignores the Obsidian config folder', async (
     fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace('.obsidian/\n', ''));
   }
 });
+
+test('from another branch, the approved version can be shown and changes come along when possible', async () => {
+  await flow.switchTo('main');
+  sh(vault, 'switch', '-q', '-c', 'setup-docs');
+  write('scripts/setup.py', 'print("setup")\n');
+  sh(vault, 'add', '-A');
+  sh(vault, 'commit', '-q', '-m', 'setup work');
+  write('qms/SOP-001.md', read('qms/SOP-001.md') + 'Skrivet på fel gren.\n');
+  let st = await flow.state();
+  assert.strictEqual(st.onBase || st.isDraft, false);
+  assert.deepStrictEqual(await flow.blockedChanges(), []);
+  await flow.switchTo('main');
+  st = await flow.state();
+  assert.strictEqual(st.onBase, true);
+  assert.deepStrictEqual(st.changes, ['qms/SOP-001.md'], 'the change came along, ready for a new draft');
+  sh(vault, 'checkout', '--', 'qms/SOP-001.md');
+});
+
+test('from another branch where the document differs, the panel can tell why changes cannot move', async () => {
+  sh(vault, 'switch', '-q', 'setup-docs');
+  write('qms/SOP-001.md', read('qms/SOP-001.md') + 'Ändrat på setup-docs.\n');
+  sh(vault, 'commit', '-q', '-am', 'setup-docs changes SOP-001');
+  write('qms/SOP-001.md', read('qms/SOP-001.md') + 'Demo-ändring.\n');
+  assert.deepStrictEqual(await flow.blockedChanges(), ['qms/SOP-001.md']);
+  await assert.rejects(flow.switchTo('main'), /would be overwritten/);
+  assert.strictEqual((await flow.state()).branch, 'setup-docs', 'nothing changed');
+  sh(vault, 'checkout', '--', 'qms/SOP-001.md');
+  sh(vault, 'switch', '-q', 'main');
+  sh(vault, 'branch', '-q', '-D', 'setup-docs');
+});
