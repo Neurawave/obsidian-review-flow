@@ -1,7 +1,7 @@
 {
   "id": "review-flow",
   "name": "Review Flow",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "minAppVersion": "1.5.0",
   "description": "Edit documents and send them for approval through GitHub pull requests, from one simple panel without git in sight.",
   "author": "granlov",
