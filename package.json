@@ -1,6 +1,6 @@
 {
   "name": "obsidian-review-flow",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "Edit documents in Obsidian and send them for approval through GitHub pull requests.",
   "license": "MIT",
